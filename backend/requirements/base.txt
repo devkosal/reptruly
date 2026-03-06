@@ -1,0 +1,39 @@
+# Core
+python-slugify==8.0.4
+Pillow==12.1.0
+argon2-cffi==25.1.0
+redis==6.1.1
+hiredis==3.3.0
+
+# Celery
+celery==5.5.3
+django-celery-beat==2.8.1
+flower==2.0.1
+
+# Django
+django==5.2.10
+django-environ==0.11.2
+django-model-utils==5.0.0
+django-allauth==65.14.0
+django-redis==5.4.0
+django-cors-headers==4.9.0
+django-storages[boto3]==1.14.6
+
+# Django Ninja API
+django-ninja-extra==0.30.9
+ninja-api-key==2.0.0
+
+# Payments
+dj-stripe==2.10.3
+
+# ASGI Server
+uvicorn[standard]==0.33.0
+
+# AWS
+boto3==1.37.38
+git+https://github.com/devkosal/django-allow-cidr-async.git@d63a73f
+
+# Utils
+python-dotenv==1.0.1
+fire==0.7.0
+tqdm==4.67.1

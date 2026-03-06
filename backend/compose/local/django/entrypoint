@@ -1,0 +1,85 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+# Try to load environment from SSM, fallback to local .envs files
+load_env_from_ssm() {
+    # Check AWS credentials - use profile if env vars not set
+    if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+        echo "AWS_ACCESS_KEY_ID is empty. attempting with reptruly profile"
+        unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION
+        export AWS_PROFILE=reptruly
+    else
+        echo "Found AWS_ACCESS_KEY_ID in env. proceeding with env aws variables"
+    fi
+
+    python /app/scripts/get_env_from_ssm.py local .env
+}
+
+load_env_from_local_files() {
+    echo "Loading environment from local .envs files..."
+    # Merge .envs/.local/.django and .envs/.local/.postgres into .env
+    cat /app/.envs/.local/.django /app/.envs/.local/.postgres > .env 2>/dev/null || true
+}
+
+# Try SSM first, fallback to local files
+if ! load_env_from_ssm 2>/dev/null; then
+    echo "WARNING: Could not load from SSM. Falling back to local .envs files."
+    echo "To use SSM, configure AWS credentials and run: python scripts/post_env_to_ssm.py local"
+    load_env_from_local_files
+fi
+
+# Support local overrides (always applied)
+if [ -f .overrides.env ]; then
+    echo "Found .overrides.env with $(wc -l < .overrides.env) line(s), appending to .env"
+    cat .overrides.env >> .env
+fi
+
+# Source the environment
+source /app/scripts/load_env.sh .env
+echo "DOMAIN_NAME is ${DOMAIN_NAME:-not set}"
+
+# Set Celery broker URL from Redis
+export CELERY_BROKER_URL="${REDIS_URL:-redis://redis:6379/0}"
+
+# Construct DATABASE_URL from individual vars if not set
+if [ -z "${DATABASE_URL:-}" ]; then
+    if [ -z "${POSTGRES_USER:-}" ]; then
+        export POSTGRES_USER='postgres'
+    fi
+    export DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+fi
+
+# Wait for PostgreSQL
+python << END
+import sys
+import time
+
+import psycopg
+
+suggest_unrecoverable_after = 30
+start = time.time()
+
+while True:
+    try:
+        psycopg.connect(
+            dbname="${POSTGRES_DB}",
+            user="${POSTGRES_USER}",
+            password="${POSTGRES_PASSWORD}",
+            host="${POSTGRES_HOST}",
+            port="${POSTGRES_PORT}",
+        )
+        break
+    except psycopg.OperationalError as error:
+        sys.stderr.write("Waiting for PostgreSQL to become available...\n")
+
+        if time.time() - start > suggest_unrecoverable_after:
+            sys.stderr.write("  This is taking longer than expected. The following exception may be indicative of an unrecoverable error: '{}'\n".format(error))
+
+    time.sleep(1)
+END
+
+>&2 echo 'PostgreSQL is available'
+exec "$@"

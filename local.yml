@@ -1,0 +1,95 @@
+volumes:
+  reptruly_local_postgres_data: {}
+  reptruly_local_postgres_data_backups: {}
+
+services:
+  django: &django
+    build:
+      context: .
+      dockerfile: ./backend/compose/local/django/Dockerfile
+    image: reptruly_local_django
+    container_name: reptruly_local_django
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app:z
+      - ~/.aws:/root/.aws:ro
+    # env_file not used - secrets loaded from SSM at runtime via entrypoint
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    expose:
+      - 5000
+    command: /start
+    stdin_open: true
+    tty: true
+
+  postgres:
+    build:
+      context: .
+      dockerfile: ./backend/compose/local/postgres/Dockerfile
+    image: reptruly_local_postgres
+    container_name: reptruly_local_postgres
+    volumes:
+      - reptruly_local_postgres_data:/var/lib/postgresql/data
+      - reptruly_local_postgres_data_backups:/backups
+    env_file:
+      - ./backend/.envs/.local/.postgres
+
+  redis:
+    image: redis:7
+    container_name: reptruly_local_redis
+
+  celeryworker:
+    <<: *django
+    image: reptruly_local_celeryworker
+    container_name: reptruly_local_celeryworker
+    depends_on:
+      - redis
+      - postgres
+    expose: []
+    command: /start-celeryworker
+
+  celerybeat:
+    <<: *django
+    image: reptruly_local_celerybeat
+    container_name: reptruly_local_celerybeat
+    depends_on:
+      - redis
+      - postgres
+    expose: []
+    command: /start-celerybeat
+
+  flower:
+    <<: *django
+    image: reptruly_local_flower
+    container_name: reptruly_local_flower
+    ports:
+      - "5555:5555"
+    expose: []
+    command: /start-flower
+
+  frontend:
+    image: node:20-slim
+    container_name: reptruly_local_frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    expose:
+      - 3000
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
+  nginx:
+    build:
+      context: .
+      dockerfile: ./backend/compose/local/nginx/Dockerfile
+    container_name: reptruly_local_nginx
+    volumes:
+      - ./backend:/app:ro
+    ports:
+      - "8002:80"
+    depends_on:
+      - django
+      - frontend

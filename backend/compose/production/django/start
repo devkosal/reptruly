@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+python /app/manage.py migrate
+
+# Create superuser if credentials are provided
+if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ]; then
+    python manage.py createsuperuser \
+        --noinput \
+        --username "$DJANGO_SUPERUSER_USERNAME" \
+        --email "$DJANGO_SUPERUSER_EMAIL" 2>/dev/null || echo "Superuser already exists"
+fi
+
+python /app/manage.py collectstatic --noinput
+
+exec gunicorn config.asgi:application \
+    -k uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:5000 \
+    --workers ${GUNICORN_WORKERS:-2} \
+    --chdir=/app

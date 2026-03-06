@@ -1,0 +1,81 @@
+name: Deploy
+
+on:
+  push:
+    branches: [release]
+    paths-ignore:
+      - 'terraform/**'
+      - '*.md'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "123456789012"
+  EB_APP: reptruly
+  EB_ENV: reptruly-prod
+  S3_BUCKET: reptruly-terraform-state
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/reptruly-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Django image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./backend/compose/production/django/Dockerfile
+          push: true
+          tags: |
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.EB_APP }}-django:latest
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.EB_APP }}-celeryworker:latest
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.EB_APP }}-celerybeat:latest
+
+      - name: Build and push Nginx image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./backend/compose/production/nginx/Dockerfile
+          push: true
+          tags: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.EB_APP }}-nginx:latest
+
+      - name: Generate deployment package
+        run: zip -r deploy.zip . -x '*.git*'
+
+      - name: Upload to S3
+        run: |
+          VERSION=${{ env.EB_APP }}-${{ github.sha }}
+          aws s3 cp deploy.zip s3://${{ env.S3_BUCKET }}/deploy/${VERSION}.zip
+
+      - name: Deploy to Elastic Beanstalk
+        uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          aws_access_key: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          application_name: ${{ env.EB_APP }}
+          environment_name: ${{ env.EB_ENV }}
+          version_label: ${{ env.EB_APP }}-${{ github.sha }}
+          region: ${{ env.AWS_REGION }}
+          deployment_package: deploy.zip
+          wait_for_environment_recovery: 420

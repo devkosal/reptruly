@@ -1,0 +1,109 @@
+{% extends "account/base.html" %}
+
+{% load crispy_forms_tags %}
+{% load i18n %}
+
+{% block head_title %}{% trans "E-mail Address" %}{% endblock %}
+
+{% block inner %}
+  <div class="row">
+    {% include "partials/_settings_sidebar.html" %}
+    <div class="col-md-5 col-lg-8">
+      <h2>{% translate "Email Address" %}</h2>
+      {% if user.emailaddress_set.all %}
+        <p>{% trans 'The following e-mail addresses are associated with your account:' %}</p>
+
+        <form action="{% url 'account_email' %}" class="email_list" method="post">
+          {% csrf_token %}
+          <fieldset class="blockLabels form-group">
+
+            {% for emailaddress in user.emailaddress_set.all %}
+              <div class="ctrlHolder form-check">
+                <label for="email_radio_{{forloop.counter}}" class="form-check-label {% if emailaddress.primary %}primary_email{%endif%}">
+
+                  <input class="form-check-input" id="email_radio_{{forloop.counter}}" type="radio" name="email" {% if emailaddress.primary or user.emailaddress_set.count == 1 %}checked="checked"{%endif %} value="{{emailaddress.email}}"/>
+
+                  {{ emailaddress.email }}
+                  {% if emailaddress.verified %}
+                    <span class="verified form-text text-muted">{% trans "Verified" %}</span>
+                  {% else %}
+                    <span class="unverified form-text text-muted" id="unverified_{{forloop.counter}}">{% trans "Unverified" %}</span>
+                  {% endif %}
+                  {% if emailaddress.primary %}<span class="primary " id="primary_{{forloop.counter}}">{% trans "(Primary)" %}</span>{% endif %}
+                </label>
+              </div>
+            {% endfor %}
+
+            <div class="buttonHolder btn-group-sm mt-3">
+              <button class="secondaryAction btn btn-secondary" type="submit" name="action_primary" >{% trans 'Make Primary' %}</button>
+              <button class="secondaryAction btn btn-secondary" type="submit" name="action_send" >{% trans 'Re-send Verification' %}</button>
+              <button class="primaryAction btn btn-danger" type="submit" name="action_remove" >{% trans 'Remove' %}</button>
+            </div>
+
+          </fieldset>
+        </form>
+
+      {% else %}
+        <p><strong>{% trans 'Warning:'%}</strong> {% trans "You currently do not have any e-mail address set up. You should really add an e-mail address so you can receive notifications, reset your password, etc." %}</p>
+
+      {% endif %}
+
+      {% if can_add_email %}
+        <h3 class="mt-2">{% trans "Add E-mail Address" %}</h3>
+
+        <form method="post" action="{% url 'account_email' %}" class="add_email">
+          {% csrf_token %}
+          {% for field in form %}
+            {{ field | as_crispy_field}}
+          {% endfor %}
+          <button class="btn btn-secondary" name="action_add" type="submit">{% trans "Add E-mail" %}</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+  <script type="text/javascript">
+    const getRadioButtonStatus = function(statusName) {
+      const radios = document.getElementsByName('email');
+      for (const radio of radios) {
+        if (radio.checked) {
+          radioNum = radio.id.split("_").slice(-1);
+          // use var here instead of let or const because var gets hoisted
+          var id_exists = document.getElementById(statusName + radioNum)
+          break
+        }
+      }
+      return !!id_exists
+    };
+    (function() {
+      var message = "{% trans 'Do you really want to remove the selected e-mail address?' %}";
+      var actions = document.getElementsByName('action_remove');
+      if (actions.length) {
+        actions[0].addEventListener("click", function(e) {
+          id_exists = getRadioButtonStatus("primary_")
+          console.log(status)
+          if (id_exists === true) {
+            console.log(status, "somehow here")
+            alert("Unable to remove primary email address.")
+            e.preventDefault();
+          } else if (! confirm(message)) {
+            e.preventDefault();
+          }
+        });
+      }
+    })();
+    (function() {
+      var message = "{% trans 'Email must be verified in order to make it primary' %}";
+      var actions = document.getElementsByName('action_primary');
+      var radios = document.getElementsByName('email');
+      if (actions.length) {
+        actions[0].addEventListener("click", function(e) {
+          id_exists = getRadioButtonStatus("unverified_")
+          if (id_exists === true) {
+            alert(message)
+            e.preventDefault();
+          }
+        });
+      }
+    })();
+  </script>
+{% endblock %}

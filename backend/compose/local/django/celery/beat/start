@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -o errexit
+set -o nounset
+
+# we don't want to run this prior to migration since celery tables will not be available
+wait-for-it -s django:5000 -t 600 -- echo "django is up"
+
+rm -f './celerybeat.pid'
+exec watchfiles celery.__main__.main --args '-A config.celery_app beat -l INFO'

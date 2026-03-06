@@ -1,0 +1,59 @@
+# This is the file that AWS EBS uses to deploy the application
+volumes:
+  production_postgres_data_backups: {}
+
+services:
+  django: &django
+    build:
+      context: .
+      dockerfile: ./backend/compose/production/django/Dockerfile
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-django
+    environment:
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    depends_on:
+      - redis
+    command: /start
+    stdin_open: true
+    tty: true
+
+  redis:
+    image: redis:7
+
+  celeryworker:
+    <<: *django
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-celeryworker
+    command: /start-celeryworker
+    expose: []
+
+  celerybeat:
+    <<: *django
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-celerybeat
+    command: /start-celerybeat
+    expose: []
+
+  flower:
+    <<: *django
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-flower
+    command: /start-flower
+    expose: []
+
+  # awscli — only needed if you use the DB backup scripts
+  # If you don't push an awscli image to ECR, EB deploy will fail trying to pull it.
+  # Comment out if not using.
+  # awscli:
+  #   build:
+  #     context: .
+  #     dockerfile: ./backend/compose/production/aws/Dockerfile
+  #   image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-awscli
+  #   volumes:
+  #     - production_postgres_data_backups:/backups:z
+
+  nginx:
+    build:
+      context: .
+      dockerfile: ./backend/compose/production/nginx/Dockerfile
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-nginx
+    depends_on:
+      - django
+    ports:
+      - 80:80

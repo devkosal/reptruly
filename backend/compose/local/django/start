@@ -1,0 +1,18 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+python /app/manage.py migrate
+python /app/manage.py collectstatic --noinput
+
+# Create superuser if credentials are provided
+if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ]; then
+    python manage.py createsuperuser \
+        --noinput \
+        --username "$DJANGO_SUPERUSER_USERNAME" \
+        --email "$DJANGO_SUPERUSER_EMAIL" 2>/dev/null || echo "Superuser already exists"
+fi
+
+exec uvicorn config.asgi:application --host 0.0.0.0 --port 5000 --reload

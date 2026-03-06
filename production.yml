@@ -1,0 +1,53 @@
+volumes:
+  production_postgres_data_backups: {}
+
+services:
+  django: &django
+    build:
+      context: .
+      dockerfile: ./backend/compose/production/django/Dockerfile
+    environment:
+      # AWS keys not needed — EB instance IAM role provides credentials
+      # - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      # - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-django
+    depends_on:
+      - redis
+    command: /start
+    stdin_open: true
+    tty: true
+
+  redis:
+    image: redis:7
+
+  celeryworker:
+    <<: *django
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-celeryworker
+    command: /start-celeryworker
+
+  celerybeat:
+    <<: *django
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-celerybeat
+    command: /start-celerybeat
+
+  flower:
+    <<: *django
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-flower
+    command: /start-flower
+
+  # awscli:
+  #   build:
+  #     context: .
+  #     dockerfile: ./backend/compose/production/aws/Dockerfile
+  #   image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-awscli
+  #   volumes:
+  #     - production_postgres_data_backups:/backups:z
+
+  nginx:
+    build:
+      context: .
+      dockerfile: ./backend/compose/production/nginx/Dockerfile
+    image: 123456789012.dkr.ecr.us-east-1.amazonaws.com/reptruly-nginx
+    depends_on:
+      - django

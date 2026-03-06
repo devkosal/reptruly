@@ -1,0 +1,16 @@
+-r base.txt
+
+# Database
+psycopg[binary]==3.2.13
+
+# WSGI Server
+gunicorn==23.0.0
+
+# Static Files
+collectfast==2.2.0
+
+# Error Tracking
+sentry-sdk==2.50.0
+
+# Email
+django-anymail==14.0
