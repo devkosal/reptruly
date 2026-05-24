@@ -28,6 +28,19 @@ class User(UUIDModel, AbstractUser):
     last_name = None  # type: ignore
     customer = OneToOneField(Customer, null=True, blank=True, on_delete=SET_NULL)
 
+    # Profile fields surfaced to the dashboard onboarding flow.
+    company_name = CharField(_("Company / Hotel group"), blank=True, max_length=255)
+    phone = CharField(_("Phone"), blank=True, max_length=64)
+    address = CharField(_("Address"), blank=True, max_length=512)
+    city = CharField(_("City"), blank=True, max_length=128)
+    state = CharField(_("State / Province"), blank=True, max_length=128)
+    country = CharField(_("Country"), blank=True, max_length=128)
+
+    @property
+    def profile_completed(self) -> bool:
+        """Profile is considered complete once the basics are filled in."""
+        return bool(self.name and self.country)
+
     def get_absolute_url(self):
         """Get url for user's detail view."""
         return reverse("users:detail", kwargs={"username": self.username})

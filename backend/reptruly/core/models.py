@@ -85,3 +85,36 @@ class BaseModel(UUIDModel, DateModel, MetadataModel):
 
     class Meta:
         abstract = True
+
+
+class SyncStatus(models.Model):
+    """Tracks the last sync attempt for each periodic data domain."""
+
+    class Domain(models.TextChoices):
+        REVIEWS = "reviews", "Reviews"
+        RATES = "rates", "Rates"
+        CALENDAR = "calendar", "Calendar"
+        ANALYTICS = "analytics", "Analytics"
+
+    class Status(models.TextChoices):
+        IDLE = "idle", "Idle"
+        RUNNING = "running", "Running"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+
+    domain = models.CharField(max_length=32, choices=Domain.choices, unique=True)
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.IDLE
+    )
+    last_synced_at = models.DateTimeField(blank=True, null=True)
+    last_started_at = models.DateTimeField(blank=True, null=True)
+    last_duration_ms = models.PositiveIntegerField(blank=True, null=True)
+    last_error = models.TextField(blank=True, default="")
+    last_record_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "Sync status"
+        verbose_name_plural = "Sync statuses"
+
+    def __str__(self):
+        return f"SyncStatus<{self.domain}: {self.status}>"

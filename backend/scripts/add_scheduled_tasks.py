@@ -16,6 +16,19 @@ every_minute_schedule, _ = CrontabSchedule.objects.get_or_create(
 every_hour_schedule, _ = CrontabSchedule.objects.get_or_create(
     minute=0, hour="*", **crontab_defaults
 )
+# Daily sync schedules — staggered so they don't all fire at the same minute.
+daily_reviews_schedule, _ = CrontabSchedule.objects.get_or_create(
+    minute=0, hour=3, **crontab_defaults
+)
+daily_rates_schedule, _ = CrontabSchedule.objects.get_or_create(
+    minute=15, hour=3, **crontab_defaults
+)
+daily_calendar_schedule, _ = CrontabSchedule.objects.get_or_create(
+    minute=30, hour=3, **crontab_defaults
+)
+daily_analytics_schedule, _ = CrontabSchedule.objects.get_or_create(
+    minute=45, hour=3, **crontab_defaults
+)
 
 
 # TODO(devkosal): manage hardcoded tasks in settings.py
@@ -41,6 +54,22 @@ TASKS = [
     CeleryTaskMetaData(
         "reptruly.billing.tasks.post_usage_charges_to_stripe",
         crontab=every_hour_schedule,
+    ),
+    CeleryTaskMetaData(
+        "reptruly.core.sync_tasks.sync_reviews_daily",
+        crontab=daily_reviews_schedule,
+    ),
+    CeleryTaskMetaData(
+        "reptruly.core.sync_tasks.sync_rates_daily",
+        crontab=daily_rates_schedule,
+    ),
+    CeleryTaskMetaData(
+        "reptruly.core.sync_tasks.sync_calendar_daily",
+        crontab=daily_calendar_schedule,
+    ),
+    CeleryTaskMetaData(
+        "reptruly.core.sync_tasks.sync_analytics_daily",
+        crontab=daily_analytics_schedule,
     ),
 ]
 

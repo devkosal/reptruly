@@ -1,73 +1,122 @@
-#  USERAPI is disabled 07.27.2023
+from django.contrib.auth import authenticate, get_user_model, login as django_login, logout as django_logout
+from django.db import IntegrityError
+from ninja.errors import HttpError
+from ninja_extra import api_controller, route
+from ninja import Schema
 
-from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import PBKDF2PasswordHasher, make_password
-from django.utils.crypto import get_random_string
-from ninja.responses import codes_4xx
-from ninja_apikey.models import APIKey
-from ninja_apikey.security import APIKeyAuth, KeyData
-from ninja_extra import api_controller, http_get, http_post
-
-from reptruly.core.common.schema import Message
-from reptruly.users.api.schema import APIKeySchema
-
-auth = APIKeyAuth()
 User = get_user_model()
-# we use PBKDF2PasswordHasher so the hashed key < 100 required max chr length in api key model
-API_KEY_HASHER = PBKDF2PasswordHasher()
 
 
-@api_controller(auth=auth)
-class UserAPI:
-    @staticmethod
-    def get_user_from_user_and_pass(
-        username: str, password: str
-    ) -> tuple[int, User | Message]:
+class LoginIn(Schema):
+    username: str
+    password: str
+
+
+class SignupIn(Schema):
+    username: str
+    email: str
+    password: str
+    name: str | None = None
+
+
+class UserOut(Schema):
+    id: str
+    username: str
+    name: str
+    email: str
+    company_name: str = ""
+    phone: str = ""
+    address: str = ""
+    city: str = ""
+    state: str = ""
+    country: str = ""
+    profile_completed: bool = False
+
+
+class ProfileUpdateIn(Schema):
+    name: str | None = None
+    company_name: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
+
+
+def _user_out(user) -> dict:
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "name": user.name or "",
+        "email": user.email,
+        "company_name": user.company_name or "",
+        "phone": user.phone or "",
+        "address": user.address or "",
+        "city": user.city or "",
+        "state": getattr(user, "state", "") or "",
+        "country": user.country or "",
+        "profile_completed": user.profile_completed,
+    }
+
+
+@api_controller("/auth", tags=["auth"])
+class AuthAPI:
+    @route.post("/login", auth=None, response=UserOut)
+    def login(self, request, data: LoginIn):
+        user = authenticate(request, username=data.username, password=data.password)
+        if not user:
+            raise HttpError(401, "Invalid username or password")
+        django_login(request, user)
+        return _user_out(user)
+
+    @route.post("/signup", auth=None, response=UserOut)
+    def signup(self, request, data: SignupIn):
+        username = data.username.strip()
+        email = data.email.strip().lower()
+        if not username or not data.password:
+            raise HttpError(400, "Username and password are required")
+        if len(data.password) < 8:
+            raise HttpError(400, "Password must be at least 8 characters")
+        if User.objects.filter(username__iexact=username).exists():
+            raise HttpError(409, "Username already taken")
+        if email and User.objects.filter(email__iexact=email).exists():
+            raise HttpError(409, "Email already registered")
         try:
-            user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            return 404, {"message": "user does not exist"}
-        if not user.check_password(password):
-            return 401, {"message": "invalid password"}
-        return user
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=data.password,
+            )
+        except IntegrityError:
+            raise HttpError(409, "Account already exists")
+        if data.name:
+            user.name = data.name.strip()
+            user.save(update_fields=["name"])
+        django_login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        return _user_out(user)
 
-    @staticmethod
-    def generate_key() -> KeyData:
-        prefix = get_random_string(8)
-        key = get_random_string(56)
-        hashed_key = make_password(key, hasher=API_KEY_HASHER)
-        return KeyData(prefix, key, hashed_key)
+    @route.post("/logout", auth=None, response={200: dict})
+    def logout(self, request):
+        django_logout(request)
+        return 200, {"message": "Logged out"}
 
-    @http_post("/create-api-key", auth=None, response={200: str, codes_4xx: Message})
-    def create_api_key(
-        self,
-        username: str,
-        password: str,
-        should_refresh: bool = False,
-        *args,
-        **kwargs
-    ) -> tuple[int, str]:
-        user = self.get_user_from_user_and_pass(username, password)
-        existing_api_keys = APIKey.objects.filter(user=user)
-        if existing_api_keys.exists():
-            if not should_refresh:
-                return 409, {"message": "API key resource already exists"}
-            else:
-                if len(existing_api_keys) > 1:
-                    return 500, {"message": "Bad API Key Configuration"}
-                existing_api_key = existing_api_keys[0]
-                existing_api_key.revoked = True
-                existing_api_key.save(update_fields=["revoked"])
-        key_data = self.generate_key()
-        key = APIKey(prefix=key_data.prefix, hashed_key=key_data.hashed_key, user=user)
-        key.save()
-        return 200, key_data.prefix + "." + key_data.key
+    @route.get("/me", auth=None, response=UserOut)
+    def me(self, request):
+        if not request.user.is_authenticated:
+            raise HttpError(401, "Not authenticated")
+        return _user_out(request.user)
 
-    @http_get("/api-key", auth=None, response={200: APIKeySchema, codes_4xx: Message})
-    def api_key(self, username: str, password: str, *args, **kwargs):
-        user = self.get_user_from_user_and_pass(username, password)
-        keys = APIKey.objects.get(user=user)
-        valid_keys = [k for k in keys.objects if k.is_valid()]
-        if not valid_keys:
-            return 404, {"message": "no valid api key found for user"}
-        return 200, valid_keys[0]
+    @route.patch("/profile", auth=None, response=UserOut)
+    def update_profile(self, request, data: ProfileUpdateIn):
+        if not request.user.is_authenticated:
+            raise HttpError(401, "Not authenticated")
+        user = request.user
+        updates: list[str] = []
+        for field in ("name", "company_name", "phone", "address", "city", "state", "country"):
+            value = getattr(data, field)
+            if value is not None:
+                setattr(user, field, value.strip())
+                updates.append(field)
+        if updates:
+            user.save(update_fields=updates + ["last_login"] if False else updates)
+        return _user_out(user)

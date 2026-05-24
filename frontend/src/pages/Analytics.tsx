@@ -1,0 +1,962 @@
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useProperty } from '../context/PropertyContext'
+import SyncFooter from '../components/SyncFooter'
+import ThemedPage from '../components/ThemedPage'
+
+interface OTAStats {
+  total: number
+  avg_score: number | null
+  replied: number
+  pending_reply: number
+  reply_rate: number | null
+  score_distribution: Record<string, number>
+}
+
+interface AnalyticsData {
+  total_reviews: number
+  avg_score: number | null
+  reviews_by_ota: Record<string, number>
+  score_distribution: Record<string, number>
+  replied: number
+  pending_reply: number
+  per_ota: Record<string, OTAStats>
+}
+
+interface OTATrends {
+  weekly_avg_score: number | null
+  monthly_avg_score: number | null
+  weekly_count: number
+  monthly_count: number
+  monthly_volume: Record<string, number>
+  monthly_avg: Record<string, number>
+}
+
+interface TrendsData extends OTATrends {
+  per_ota: Record<string, OTATrends>
+}
+
+function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+  return (
+    <div className="stat-card">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value">{value}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
+    </div>
+  )
+}
+
+function PerOTAStat({
+  label, value, sub, highlight = false,
+}: {
+  label: string
+  value: string | number
+  sub?: string
+  highlight?: boolean
+}) {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 11, color: '#6b7280' }}>{label}</div>
+      <div style={{
+        fontSize: highlight ? 18 : 15,
+        fontWeight: highlight ? 700 : 600,
+        color: '#111827',
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: 6,
+      }}>
+        {value}
+        {sub && <span style={{ fontSize: 11, fontWeight: 400, color: '#9ca3af' }}>{sub}</span>}
+      </div>
+    </div>
+  )
+}
+
+function VerticalBarChart({
+  data,
+  color = '#6c63ff',
+  colors,
+  unit = '',
+  rotateLabels = false,
+  barWidth = 36,
+}: {
+  data: Record<string, number>
+  color?: string
+  colors?: Record<string, string>
+  unit?: string
+  rotateLabels?: boolean
+  barWidth?: number
+}) {
+  const max = Math.max(...Object.values(data), 1)
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'flex-end',
+      gap: 10,
+      height: 200,
+      paddingBottom: rotateLabels ? 40 : 28,
+      paddingTop: 20,
+      overflowX: 'auto',
+    }}>
+      {Object.entries(data).map(([label, value]) => {
+        const barColor = colors?.[label] || color
+        const pct = (value / max) * 100
+        return (
+          <div key={label} style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            width: barWidth,
+            flexShrink: 0,
+            height: '100%',
+            justifyContent: 'flex-end',
+            position: 'relative',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 4, lineHeight: 1 }}>
+              {value > 0 ? (unit === '/10' ? value.toFixed(1) : value) : ''}
+            </div>
+            <div style={{
+              width: '100%',
+              flex: 1,
+              display: 'flex',
+              alignItems: 'flex-end',
+              background: '#f1f5f9',
+              borderRadius: 4,
+            }}>
+              <div style={{
+                width: '100%',
+                height: `${pct}%`,
+                background: value > 0 ? barColor : 'transparent',
+                borderRadius: 4,
+                minHeight: value > 0 ? 4 : 0,
+                transition: 'height 0.4s ease',
+              }} />
+            </div>
+            <div style={{
+              fontSize: 11,
+              color: '#9ca3af',
+              marginTop: 6,
+              textAlign: 'center',
+              whiteSpace: 'nowrap',
+              ...(rotateLabels ? {
+                transform: 'rotate(-45deg)',
+                transformOrigin: 'top right',
+                position: 'absolute',
+                bottom: -2,
+                right: '50%',
+              } : {}),
+            }}>
+              {label}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+interface AISummaryData {
+  positives: string
+  problems: string
+  review_count: number
+}
+
+function AISummaryCard({
+  propertyName,
+  fromDate,
+  toDate,
+}: {
+  propertyName: string | null
+  fromDate: string
+  toDate: string
+}) {
+  const [summary, setSummary] = useState<AISummaryData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const fetchedFor = useRef<string | null>(undefined)
+
+  function fetchSummary() {
+    const key = `${propertyName ?? '__all__'}|${fromDate}|${toDate}`
+    if (fetchedFor.current === key) return
+    setLoading(true)
+    setError('')
+    setSummary(null)
+    const params = new URLSearchParams()
+    if (propertyName) params.set('property_name', propertyName)
+    if (fromDate) params.set('from_date', fromDate)
+    if (toDate) params.set('to_date', toDate)
+    const qs = params.toString() ? `?${params}` : ''
+    fetch(`/api/reviews/analytics/ai-summary${qs}`)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+      .then(d => { setSummary(d); fetchedFor.current = key })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }
+
+  // Reset when property or date range changes — user must click Refresh to re-run the LLM call.
+  useEffect(() => {
+    setSummary(null)
+    setError('')
+    fetchedFor.current = undefined
+  }, [propertyName, fromDate, toDate])
+
+  return (
+    <div className="card" style={{ gridColumn: '1 / -1', marginBottom: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: summary || loading ? 16 : 0 }}>
+        <div>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 2 }}>AI Review Summary</h3>
+          {!summary && !loading && (
+            <p style={{ fontSize: 12, color: '#9ca3af' }}>GPT-4o analysis of top positives and problems from guest reviews</p>
+          )}
+        </div>
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={fetchSummary}
+          disabled={loading}
+          style={{ flexShrink: 0 }}
+        >
+          {loading ? 'Analysing…' : summary ? '↻ Refresh' : '✦ Summarise Reviews'}
+        </button>
+      </div>
+
+      {error && <div className="error-msg" style={{ marginTop: 8 }}>{error}</div>}
+
+      {loading && (
+        <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
+          Analysing {propertyName ? `${propertyName}` : 'all properties'} reviews with GPT-4o…
+        </div>
+      )}
+
+      {summary && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, padding: '14px 16px' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#166534', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              ✓ Top Positives
+            </div>
+            <div style={{ fontSize: 13, color: '#15803d', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{summary.positives}</div>
+          </div>
+          <div style={{ background: '#fff7f7', border: '1px solid #fca5a5', borderRadius: 8, padding: '14px 16px' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#991b1b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              ✗ Top Problems
+            </div>
+            <div style={{ fontSize: 13, color: '#b91c1c', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{summary.problems}</div>
+          </div>
+          <div style={{ gridColumn: '1 / -1', fontSize: 11, color: '#9ca3af', textAlign: 'right' }}>
+            Based on {summary.review_count} reviews · Powered by GPT-4o mini
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+type Priority = 'high' | 'medium' | 'low'
+
+interface TopicScore {
+  topic: string
+  label: string
+  score: number | null
+  mentions: number
+  note: string
+  priority: Priority
+}
+
+function priorityStyle(p: Priority): React.CSSProperties {
+  const base: React.CSSProperties = {
+    display: 'inline-block', padding: '3px 10px', borderRadius: 999,
+    fontSize: 11, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase',
+    border: '1px solid',
+    whiteSpace: 'nowrap',
+  }
+  if (p === 'high') return { ...base, background: '#fee2e2', color: '#991b1b', borderColor: '#fca5a5' }
+  if (p === 'medium') return { ...base, background: '#fef3c7', color: '#92400e', borderColor: '#fcd34d' }
+  return { ...base, background: '#dcfce7', color: '#166534', borderColor: '#86efac' }
+}
+interface TopicScoresData {
+  review_count: number
+  topics: TopicScore[]
+  cached: boolean
+}
+
+function topicBarStyle(score: number | null): { fill: string; track: string; text: string } {
+  if (score === null) return { fill: '#e5e7eb', track: '#f3f4f6', text: '#9ca3af' }
+  if (score >= 8)  return { fill: 'linear-gradient(90deg, #10b981, #34d399)', track: '#ecfdf5', text: '#065f46' }
+  if (score >= 6)  return { fill: 'linear-gradient(90deg, #84cc16, #a3e635)', track: '#f7fee7', text: '#3f6212' }
+  if (score >= 4)  return { fill: 'linear-gradient(90deg, #f59e0b, #fbbf24)', track: '#fffbeb', text: '#92400e' }
+  return                { fill: 'linear-gradient(90deg, #ef4444, #f87171)', track: '#fef2f2', text: '#991b1b' }
+}
+
+function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: string | null; fromDate: string; toDate: string }) {
+  const [data, setData] = useState<TopicScoresData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const fetchedFor = useRef<string | null>(undefined)
+
+  function fetchTopics(force = false) {
+    const key = `${propertyName ?? '__all__'}|${fromDate}|${toDate}`
+    if (!force && fetchedFor.current === key) return
+    setLoading(true)
+    setError('')
+    setData(null)
+    const params = new URLSearchParams()
+    if (propertyName) params.set('property_name', propertyName)
+    if (fromDate) params.set('from_date', fromDate)
+    if (toDate) params.set('to_date', toDate)
+    if (force) params.set('force_refresh', 'true')
+    const qs = params.toString() ? `?${params}` : ''
+    fetch(`/api/reviews/analytics/topics${qs}`)
+      .then(async r => {
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}))
+          throw new Error(j.message || `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+      .then(d => { setData(d); fetchedFor.current = key })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }
+
+  // Reset card when filters change — user re-runs by clicking Refresh.
+  useEffect(() => {
+    setData(null)
+    setError('')
+    fetchedFor.current = undefined
+  }, [propertyName, fromDate, toDate])
+
+  return (
+    <div className="card" style={{ gridColumn: '1 / -1', marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: data || loading ? 16 : 0 }}>
+        <div>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 2 }}>
+            Category Breakdown
+          </h3>
+          {!data && !loading && (
+            <p style={{ fontSize: 12, color: '#9ca3af' }}>
+              Per-category sentiment with mentions, score and priority — cleanliness, housekeeping, staff, beds,
+              breakfast, pool & amenities, maintenance, safety, location, value for money.
+            </p>
+          )}
+        </div>
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={() => fetchTopics(!!data)}
+          disabled={loading}
+          style={{ flexShrink: 0 }}
+        >
+          {loading ? 'Scoring…' : data ? '↻ Refresh' : '✦ Run analysis'}
+        </button>
+      </div>
+
+      {error && <div className="error-msg" style={{ marginTop: 8 }}>{error}</div>}
+
+      {loading && (
+        <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
+          Analysing {propertyName ? `${propertyName}'s` : 'all'} recent reviews with GPT-4o mini across 10 categories…
+        </div>
+      )}
+
+      {data && (
+        <div>
+          {/* Priority counters at the top */}
+          {(() => {
+            const counts = { high: 0, medium: 0, low: 0 }
+            data.topics.forEach(t => {
+              counts[t.priority] = (counts[t.priority] || 0) + 1
+            })
+            return (
+              <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+                <div style={{ ...priorityStyle('high'), fontSize: 12 }}>{counts.high} HIGH</div>
+                <div style={{ ...priorityStyle('medium'), fontSize: 12 }}>{counts.medium} MEDIUM</div>
+                <div style={{ ...priorityStyle('low'), fontSize: 12 }}>{counts.low} LOW</div>
+              </div>
+            )
+          })()}
+
+          {/* Table */}
+          <div style={{
+            border: '1px solid #f3e8ff', borderRadius: 12, overflow: 'hidden',
+            background: 'linear-gradient(180deg, #ffffff 0%, #fdf4ff 100%)',
+          }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{
+                  background: 'linear-gradient(90deg, #fdf2f8 0%, #f3e8ff 100%)',
+                  borderBottom: '1px solid #e9d5ff',
+                }}>
+                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Category</th>
+                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Score</th>
+                  <th style={{ textAlign: 'right', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Mentions</th>
+                  <th style={{ textAlign: 'center', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Priority</th>
+                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>What guests say</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...data.topics]
+                  .sort((a, b) => {
+                    // High → Med → Low; within each, lowest score first (most painful at the top).
+                    const rank = { high: 0, medium: 1, low: 2 } as const
+                    if (rank[a.priority] !== rank[b.priority]) return rank[a.priority] - rank[b.priority]
+                    const sa = a.score ?? 99, sb = b.score ?? 99
+                    return sa - sb
+                  })
+                  .map((t, idx) => {
+                    const colors = topicBarStyle(t.score)
+                    const pct = t.score === null ? 0 : (t.score / 10) * 100
+                    return (
+                      <tr key={t.topic} style={{
+                        background: idx % 2 === 0 ? '#fff' : '#fdfaff',
+                        borderBottom: idx === data.topics.length - 1 ? 'none' : '1px solid #f3e8ff',
+                      }}>
+                        <td style={{ padding: '12px 14px', fontWeight: 600, color: '#1a1a2e', verticalAlign: 'middle' }}>
+                          {t.label}
+                        </td>
+                        <td style={{ padding: '12px 14px', verticalAlign: 'middle', minWidth: 160 }}>
+                          {t.score === null ? (
+                            <span style={{ fontSize: 12, color: '#9ca3af' }}>—</span>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 14, fontWeight: 800, color: colors.text, fontVariantNumeric: 'tabular-nums', minWidth: 30 }}>
+                                {t.score.toFixed(1)}
+                              </span>
+                              <div style={{ flex: 1, height: 6, background: colors.track, borderRadius: 3, overflow: 'hidden', minWidth: 70 }}>
+                                <div style={{ height: '100%', width: `${pct}%`, background: colors.fill, borderRadius: 3 }} />
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right', color: '#1f2937', verticalAlign: 'middle', fontVariantNumeric: 'tabular-nums' }}>
+                          {t.mentions}
+                        </td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle' }}>
+                          <span style={priorityStyle(t.priority)}>{t.priority}</span>
+                        </td>
+                        <td style={{ padding: '12px 14px', color: '#374151', lineHeight: 1.5, verticalAlign: 'middle' }}>
+                          {t.note || <span style={{ color: '#9ca3af' }}>—</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'right', marginTop: 12 }}>
+            Based on the latest {data.review_count} reviews{data.cached ? ' · cached' : ''} · Priority blends score and mention volume · Powered by GPT-4o mini
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const OTA_COLORS: Record<string, string> = {
+  Airbnb: '#ff5a5f',
+  'Booking.com': '#003580',
+  Expedia: '#f5a623',
+  Google: '#34a853',
+}
+
+interface AnalyticsView {
+  total: number
+  avg_score: number | null
+  replied: number
+  pending_reply: number
+  reply_rate: number  // 0-100
+  score_distribution: Record<string, number>
+  weekly_avg_score: number | null
+  monthly_avg_score: number | null
+  weekly_count: number
+  monthly_count: number
+  monthly_volume: Record<string, number>
+  monthly_avg: Record<string, number>
+}
+
+function buildAllOTAsView(data: AnalyticsData, trends: TrendsData): AnalyticsView {
+  const replyRate = data.total_reviews > 0 ? Math.round((data.replied / data.total_reviews) * 100) : 0
+  return {
+    total: data.total_reviews,
+    avg_score: data.avg_score,
+    replied: data.replied,
+    pending_reply: data.pending_reply,
+    reply_rate: replyRate,
+    score_distribution: data.score_distribution,
+    weekly_avg_score: trends.weekly_avg_score,
+    monthly_avg_score: trends.monthly_avg_score,
+    weekly_count: trends.weekly_count,
+    monthly_count: trends.monthly_count,
+    monthly_volume: trends.monthly_volume,
+    monthly_avg: trends.monthly_avg,
+  }
+}
+
+function buildOTAView(ota: string, data: AnalyticsData, trends: TrendsData): AnalyticsView | null {
+  const stats = data.per_ota?.[ota]
+  const ot = trends.per_ota?.[ota]
+  if (!stats || !ot) return null
+  return {
+    total: stats.total,
+    avg_score: stats.avg_score,
+    replied: stats.replied,
+    pending_reply: stats.pending_reply,
+    reply_rate: stats.reply_rate ?? 0,
+    score_distribution: stats.score_distribution,
+    weekly_avg_score: ot.weekly_avg_score,
+    monthly_avg_score: ot.monthly_avg_score,
+    weekly_count: ot.weekly_count,
+    monthly_count: ot.monthly_count,
+    monthly_volume: ot.monthly_volume,
+    monthly_avg: ot.monthly_avg,
+  }
+}
+
+type ViewMode = 'overview' | 'insights'
+
+function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
+  const navigate = useNavigate()
+  const [data, setData] = useState<AnalyticsData | null>(null)
+  const [trends, setTrends] = useState<TrendsData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  // Top-level view selector — 'overview' (KPIs + per-OTA) or 'insights' (AI summary + category table).
+  const [viewMode, setViewMode] = useState<ViewMode>('overview')
+  // Active OTA tab — 'all' or an OTA name. Used inside Overview. Defaults to 'all'; resets when property changes.
+  const [activeTab, setActiveTab] = useState<string>('all')
+  // Date-range filter — applied to all analytics fetches (summary, trends, AI summary).
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+
+  // Only treat a date as "set" when it parses as a complete YYYY-MM-DD string. This stops
+  // mid-typing partials (e.g. "2026-05-") from reaching the server and triggering bogus refetches.
+  const isCompleteDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s)
+  const fromParam = isCompleteDate(fromDate) ? fromDate : ''
+  const toParam = isCompleteDate(toDate) ? toDate : ''
+
+  useEffect(() => {
+    setLoading(true)
+    setError('')
+    const params = new URLSearchParams()
+    if (propertyName) params.set('property_name', propertyName)
+    if (fromParam) params.set('from_date', fromParam)
+    if (toParam) params.set('to_date', toParam)
+    const qs = params.toString() ? `?${params}` : ''
+    Promise.all([
+      fetch(`/api/reviews/analytics/summary${qs}`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() }),
+      fetch(`/api/reviews/analytics/trends${qs}`).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() }),
+    ])
+      .then(([summary, trendsData]) => { setData(summary); setTrends(trendsData) })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [propertyName, fromParam, toParam])
+
+  // Reset active tab when the property changes (date-range changes preserve the tab).
+  useEffect(() => { setActiveTab('all') }, [propertyName])
+
+  function openReviews(otaName: string | null) {
+    const params = new URLSearchParams()
+    if (propertyName) params.set('property_name', propertyName)
+    if (otaName) params.set('ota_name', otaName)
+    if (fromDate) params.set('from_date', fromDate)
+    if (toDate) params.set('to_date', toDate)
+    const qs = params.toString() ? `?${params}` : ''
+    navigate(`/reviews${qs}`)
+  }
+
+  // Initial load (no data yet) — show the loading placeholder. For subsequent refetches
+  // (e.g. user typing into the date filter), keep the previous data on screen with a
+  // subtle indicator so the date inputs don't unmount and lose focus.
+  if (!data || !trends) {
+    if (error) return <div className="error-msg">{error}</div>
+    return <div className="loading">Loading analytics…</div>
+  }
+
+  const otaColors = OTA_COLORS
+
+  const otaList = Object.entries(data.per_ota || {}).sort((a, b) => b[1].total - a[1].total)
+  const isAllTab = activeTab === 'all'
+  const view = isAllTab
+    ? buildAllOTAsView(data, trends)
+    : buildOTAView(activeTab, data, trends)
+
+  // If the active tab no longer has data (e.g. property change wiped it), fall back to All.
+  if (!view) {
+    return null
+  }
+
+  const tabAccent = isAllTab ? '#6c63ff' : (otaColors[activeTab] || '#6c63ff')
+  const replyRate = view.reply_rate
+
+  const hasDateFilter = !!(fromDate || toDate)
+
+  return (
+    <>
+      {/* Date-range filter — applies to all analytics on this page */}
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'flex-end',
+        gap: 12,
+        marginBottom: 16,
+        padding: '12px 14px',
+        background: '#fff',
+        border: '1px solid #e5e7eb',
+        borderRadius: 10,
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', alignSelf: 'center' }}>
+          Date range
+        </div>
+        <div>
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>From</label>
+          <input
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={e => setFromDate(e.target.value)}
+            style={{ padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #d1d5db', fontFamily: 'inherit' }}
+          />
+        </div>
+        <div>
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>To</label>
+          <input
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={e => setToDate(e.target.value)}
+            style={{ padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #d1d5db', fontFamily: 'inherit' }}
+          />
+        </div>
+        <button
+          onClick={() => { setFromDate(''); setToDate('') }}
+          disabled={!hasDateFilter}
+          style={{
+            padding: '8px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6,
+            border: `1px solid ${hasDateFilter ? '#d1d5db' : '#e5e7eb'}`,
+            background: hasDateFilter ? '#f9fafb' : '#f3f4f6',
+            color: hasDateFilter ? '#374151' : '#9ca3af',
+            cursor: hasDateFilter ? 'pointer' : 'not-allowed',
+          }}
+        >
+          Clear
+        </button>
+        <div style={{ marginLeft: 'auto', fontSize: 11, color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {loading && <span style={{ color: '#6c63ff', fontWeight: 600 }}>↻ Refreshing…</span>}
+          <span>Filters apply to KPIs, charts and AI summary</span>
+        </div>
+      </div>
+
+      {/* View selector — switches between Overview (KPIs/charts/OTA tabs) and AI Insights */}
+      <div style={{
+        display: 'inline-flex',
+        gap: 4,
+        marginBottom: 18,
+        padding: 4,
+        background: '#fff',
+        border: '1px solid #f3e8ff',
+        borderRadius: 12,
+        boxShadow: '0 1px 3px rgba(168,85,247,0.06)',
+      }}>
+        {([
+          { key: 'overview' as ViewMode, label: '📊 Overview', sub: 'KPIs, trends, per-OTA' },
+          { key: 'insights' as ViewMode, label: '✦ AI Insights', sub: 'Summary & category breakdown' },
+        ]).map(v => {
+          const active = viewMode === v.key
+          return (
+            <button
+              key={v.key}
+              onClick={() => setViewMode(v.key)}
+              title={v.sub}
+              style={{
+                background: active ? 'linear-gradient(135deg, #ec4899 0%, #a855f7 100%)' : 'transparent',
+                color: active ? '#fff' : '#6d28d9',
+                border: 'none',
+                borderRadius: 9,
+                padding: '10px 18px',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                boxShadow: active ? '0 4px 12px rgba(168,85,247,0.30)' : 'none',
+                transition: 'background 0.15s',
+              }}
+            >
+              {v.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {viewMode === 'insights' && (
+        <>
+          <AISummaryCard propertyName={propertyName} fromDate={fromParam} toDate={toParam} />
+          <TopicScoresCard propertyName={propertyName} fromDate={fromParam} toDate={toParam} />
+        </>
+      )}
+
+      {viewMode === 'overview' && (
+      <>
+      {/* OTA Tabs */}
+      <div style={{
+        display: 'flex',
+        gap: 4,
+        marginTop: 4,
+        marginBottom: 16,
+        borderBottom: '1px solid #e5e7eb',
+        flexWrap: 'wrap',
+      }}>
+        {[{ key: 'all', label: 'All OTAs', total: data.total_reviews }, ...otaList.map(([ota, stats]) => ({ key: ota, label: ota, total: stats.total }))].map(t => {
+          const active = activeTab === t.key
+          const color = t.key === 'all' ? '#6c63ff' : (otaColors[t.key] || '#6c63ff')
+          return (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                borderBottom: `2px solid ${active ? color : 'transparent'}`,
+                padding: '10px 14px',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: active ? 700 : 500,
+                color: active ? color : '#6b7280',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              {t.key !== 'all' && <span style={{ width: 8, height: 8, borderRadius: 4, background: color }} />}
+              {t.label}
+              <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>({t.total})</span>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="stats-grid">
+        <StatCard label="Total Reviews" value={view.total} />
+        <StatCard
+          label="All-Time Avg Score"
+          value={view.avg_score !== null ? `${view.avg_score} / 10` : '—'}
+        />
+        <StatCard
+          label="This Week's Avg"
+          value={view.weekly_avg_score !== null ? `${view.weekly_avg_score} / 10` : '—'}
+          sub={`${view.weekly_count} review${view.weekly_count !== 1 ? 's' : ''} this week`}
+        />
+        <StatCard
+          label="This Month's Avg"
+          value={view.monthly_avg_score !== null ? `${view.monthly_avg_score} / 10` : '—'}
+          sub={`${view.monthly_count} review${view.monthly_count !== 1 ? 's' : ''} this month`}
+        />
+        <StatCard
+          label="Reply Rate"
+          value={`${replyRate}%`}
+          sub={`${view.replied} replied, ${view.pending_reply} pending`}
+        />
+        <StatCard label="Pending Replies" value={view.pending_reply} />
+      </div>
+
+      {/* Per-OTA breakdown — only on the "All OTAs" tab. Each card drills into the reviews list. */}
+      {isAllTab && otaList.length > 0 && (
+        <div className="card" style={{ marginTop: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', margin: 0 }}>By OTA</h3>
+            <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Click any card to view those reviews</p>
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${otaList.length + 1}, 1fr)`,
+            gap: 12,
+          }}>
+            {/* "All" column — drills into all OTAs (no ota filter) */}
+            <button
+              type="button"
+              onClick={() => openReviews(null)}
+              title="View all reviews"
+              style={{
+                border: '1px solid #e5e7eb',
+                borderRadius: 8,
+                padding: 14,
+                background: '#f9fafb',
+                textAlign: 'left',
+                cursor: 'pointer',
+                font: 'inherit',
+                color: 'inherit',
+                transition: 'transform 0.12s, box-shadow 0.12s, border-color 0.12s',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.transform = 'translateY(-2px)'
+                e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,0.08)'
+                e.currentTarget.style.borderColor = '#d1d5db'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.transform = ''
+                e.currentTarget.style.boxShadow = ''
+                e.currentTarget.style.borderColor = '#e5e7eb'
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>All OTAs</span>
+                <span style={{ fontSize: 10, color: '#9ca3af' }}>View →</span>
+              </div>
+              <PerOTAStat label="Reviews" value={data.total_reviews} />
+              <PerOTAStat label="Avg score" value={data.avg_score !== null ? `${data.avg_score} / 10` : '—'} highlight />
+              <PerOTAStat label="Replied" value={data.replied} sub={`${replyRate}%`} />
+              <PerOTAStat label="Pending" value={data.pending_reply} />
+            </button>
+
+            {otaList.map(([ota, stats]) => {
+              const color = otaColors[ota] || '#6c63ff'
+              return (
+                <button
+                  type="button"
+                  key={ota}
+                  onClick={() => openReviews(ota)}
+                  title={`View ${ota} reviews`}
+                  style={{
+                    border: `1px solid ${color}33`,
+                    borderRadius: 8,
+                    padding: 14,
+                    background: `${color}08`,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    font: 'inherit',
+                    color: 'inherit',
+                    transition: 'transform 0.12s, box-shadow 0.12s, border-color 0.12s',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                    e.currentTarget.style.boxShadow = `0 4px 14px ${color}33`
+                    e.currentTarget.style.borderColor = `${color}66`
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.transform = ''
+                    e.currentTarget.style.boxShadow = ''
+                    e.currentTarget.style.borderColor = `${color}33`
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 4, background: color }} />
+                      {ota}
+                    </span>
+                    <span style={{ fontSize: 10, opacity: 0.7 }}>View →</span>
+                  </div>
+                  <PerOTAStat label="Reviews" value={stats.total} />
+                  <PerOTAStat label="Avg score" value={stats.avg_score !== null ? `${stats.avg_score} / 10` : '—'} highlight />
+                  <PerOTAStat
+                    label="Replied"
+                    value={stats.replied}
+                    sub={stats.reply_rate !== null ? `${stats.reply_rate}%` : '—'}
+                  />
+                  <PerOTAStat label="Pending" value={stats.pending_reply} />
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="charts-grid">
+        {isAllTab && (
+          <div className="card">
+            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>Reviews by OTA</h3>
+            <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>Volume per booking channel</p>
+            {Object.keys(data.reviews_by_ota).length === 0 ? (
+              <p style={{ color: '#aaa', fontSize: 14 }}>No data yet</p>
+            ) : (
+              <VerticalBarChart data={data.reviews_by_ota} colors={otaColors} barWidth={52} />
+            )}
+          </div>
+        )}
+
+        <div className="card" style={isAllTab ? undefined : { gridColumn: '1 / -1' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>
+            Score Distribution{!isAllTab && ` — ${activeTab}`}
+          </h3>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>Reviews per score band (out of 10)</p>
+          {Object.values(view.score_distribution).every(v => v === 0) ? (
+            <p style={{ color: '#aaa', fontSize: 14 }}>No scored reviews yet</p>
+          ) : (
+            <VerticalBarChart data={view.score_distribution} color={tabAccent} barWidth={52} />
+          )}
+        </div>
+
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>
+            Monthly Review Volume{!isAllTab && ` — ${activeTab}`}
+          </h3>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>Number of reviews received — last 12 months</p>
+          {Object.values(view.monthly_volume).every(v => v === 0) ? (
+            <p style={{ color: '#aaa', fontSize: 14 }}>No data yet</p>
+          ) : (
+            <VerticalBarChart data={view.monthly_volume} color={tabAccent} rotateLabels barWidth={36} />
+          )}
+        </div>
+
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>
+            Monthly Avg Score{!isAllTab && ` — ${activeTab}`}
+          </h3>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>Average guest score per month (out of 10) — last 12 months</p>
+          {Object.values(view.monthly_avg).every(v => v === 0) ? (
+            <p style={{ color: '#aaa', fontSize: 14 }}>No scored reviews yet</p>
+          ) : (
+            <VerticalBarChart data={view.monthly_avg} color="#22c55e" unit="/10" rotateLabels barWidth={36} />
+          )}
+        </div>
+
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>
+            Reply Status{!isAllTab && ` — ${activeTab}`}
+          </h3>
+          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 16 }}>How many reviews have received a response</p>
+          <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 13, color: '#22c55e', fontWeight: 600 }}>Replied</span>
+                <span style={{ fontSize: 13, color: '#888' }}>{view.replied}</span>
+              </div>
+              <div className="bar-track" style={{ height: 12 }}>
+                <div className="bar-fill" style={{ width: `${replyRate}%`, background: '#22c55e' }} />
+              </div>
+            </div>
+            <div style={{
+              fontSize: 28, fontWeight: 800,
+              color: replyRate >= 80 ? '#22c55e' : replyRate >= 50 ? '#f59e0b' : '#ef4444',
+            }}>
+              {replyRate}%
+            </div>
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', gap: 24 }}>
+            <div style={{ fontSize: 13, color: '#888' }}>
+              <span style={{ color: '#22c55e', fontWeight: 600 }}>●</span> {view.replied} replied
+            </div>
+            <div style={{ fontSize: 13, color: '#888' }}>
+              <span style={{ color: '#ef4444', fontWeight: 600 }}>●</span> {view.pending_reply} pending
+            </div>
+          </div>
+        </div>
+      </div>
+      </>
+      )}
+    </>
+  )
+}
+
+export default function Analytics() {
+  const { selectedProperty } = useProperty()
+
+  return (
+    <ThemedPage
+      eyebrow="📊 AI Analytics"
+      title={selectedProperty ? selectedProperty.property_name : 'Analytics'}
+      subtitle={selectedProperty
+        ? `${selectedProperty.location || 'Across all OTAs'} — per-OTA scores, trends, and AI summaries`
+        : 'Aggregated insights across all properties'}
+    >
+      <PropertyAnalytics propertyName={selectedProperty?.property_name ?? null} />
+      <SyncFooter domain="analytics" />
+    </ThemedPage>
+  )
+}
