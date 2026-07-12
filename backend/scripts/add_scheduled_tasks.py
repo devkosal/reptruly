@@ -29,6 +29,21 @@ daily_calendar_schedule, _ = CrontabSchedule.objects.get_or_create(
 daily_analytics_schedule, _ = CrontabSchedule.objects.get_or_create(
     minute=45, hour=3, **crontab_defaults
 )
+# Digest emails go out after the 03:00 UTC syncs have landed fresh data.
+# 13:00 UTC ≈ 9am US Eastern.
+daily_digest_schedule, _ = CrontabSchedule.objects.get_or_create(
+    minute=0, hour=13, **crontab_defaults
+)
+weekly_summary_schedule, _ = CrontabSchedule.objects.get_or_create(
+    minute=15,
+    hour=13,
+    day_of_week="1",  # Monday
+    day_of_month="*",
+    month_of_year="*",
+)
+rate_alerts_schedule, _ = CrontabSchedule.objects.get_or_create(
+    minute=45, hour=13, **crontab_defaults
+)
 
 
 # TODO(devkosal): manage hardcoded tasks in settings.py
@@ -52,10 +67,6 @@ TASKS = [
         enabled=False,
     ),
     CeleryTaskMetaData(
-        "reptruly.billing.tasks.post_usage_charges_to_stripe",
-        crontab=every_hour_schedule,
-    ),
-    CeleryTaskMetaData(
         "reptruly.core.sync_tasks.sync_reviews_daily",
         crontab=daily_reviews_schedule,
     ),
@@ -70,6 +81,18 @@ TASKS = [
     CeleryTaskMetaData(
         "reptruly.core.sync_tasks.sync_analytics_daily",
         crontab=daily_analytics_schedule,
+    ),
+    CeleryTaskMetaData(
+        "reptruly.users.tasks.send_daily_digests",
+        crontab=daily_digest_schedule,
+    ),
+    CeleryTaskMetaData(
+        "reptruly.users.tasks.send_weekly_summaries",
+        crontab=weekly_summary_schedule,
+    ),
+    CeleryTaskMetaData(
+        "reptruly.reviews.tasks.send_rate_opportunity_alerts",
+        crontab=rate_alerts_schedule,
     ),
 ]
 

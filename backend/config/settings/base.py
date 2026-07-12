@@ -66,6 +66,7 @@ LOCAL_APPS = [
     "reptruly.users",
     "reptruly.core",
     "reptruly.billing",
+    "reptruly.reviews",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -231,9 +232,30 @@ CORS_ALLOW_CREDENTIALS = True
 STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", default=False)
 STRIPE_LIVE_SECRET_KEY = env("STRIPE_LIVE_SECRET_KEY", default="")
 STRIPE_TEST_SECRET_KEY = env("STRIPE_TEST_SECRET_KEY", default="")
+# Base URL used to build absolute return URLs for Stripe (e.g. the billing portal).
+# Stripe requires an https return URL, so for local testing point this at your ngrok
+# domain; defaults to localhost for everything else.
+DOMAIN_NAME = env("DOMAIN_NAME", default="http://localhost:8000")
 DJSTRIPE_WEBHOOK_VALIDATION = "retrieve_event"
 DJSTRIPE_USE_NATIVE_JSONFIELD = True
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = "id"
+
+# Channex
+# ------------------------------------------------------------------------------
+CHANNEX_API_KEY = env("CHANNEX_API_KEY", default="")
+CHANNEX_BASE_URL = env("CHANNEX_BASE_URL", default="https://staging.channex.io/api/v1")
+
+# RapidAPI / Booking.com
+RAPIDAPI_KEY = env("RAPIDAPI_KEY", default="")
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+BOOKING_COM_HOTEL_ID = env.int("BOOKING_COM_HOTEL_ID", default=0)
+
+# Ticketmaster (events) — free tier at https://developer.ticketmaster.com/
+TICKETMASTER_API_KEY = env("TICKETMASTER_API_KEY", default="")
+
+# Google Places — for Google reviews on connected properties (5-review cap on standard tier).
+# Get a key from https://console.cloud.google.com (enable "Places API").
+GOOGLE_PLACES_API_KEY = env("GOOGLE_PLACES_API_KEY", default="")
 
 # Rate Limiting
 # ------------------------------------------------------------------------------

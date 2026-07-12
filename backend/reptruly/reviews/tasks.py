@@ -10,8 +10,13 @@ from reptruly.reviews.expedia.client import ExpediaClient, ExpediaNotSubscribedE
 from reptruly.reviews.google.client import GoogleNotConfiguredError, GooglePlacesClient, normalize_google_review
 from reptruly.reviews.models import Property, Review
 from reptruly.reviews.rapidapi.client import BookingComClient
+from reptruly.users.emails import NEGATIVE_SCORE_MAX, send_negative_review_alert
 
 logger = logging.getLogger(__name__)
+
+
+def _is_negative(review: Review) -> bool:
+    return review.overall_score is not None and review.overall_score <= NEGATIVE_SCORE_MAX
 
 
 @shared_task(bind=True, max_retries=3)
@@ -63,10 +68,10 @@ def sync_reviews_from_channex(self, ota_name: str = "Booking.com"):
         raise self.retry(exc=exc, countdown=60)
 
 
-def _upsert_booking_review(item: dict, property_obj: Property) -> bool:
+def _upsert_booking_review(item: dict, property_obj: Property) -> tuple[Review, bool] | None:
     review_id = str(item.get("review_id", "") or item.get("review_hash", ""))
     if not review_id:
-        return False
+        return None
 
     # Prefer the review post date ("date") over the stay's check-in date —
     # they often differ by several days and the post date is what users
@@ -90,7 +95,7 @@ def _upsert_booking_review(item: dict, property_obj: Property) -> bool:
     author = item.get("author") or {}
     reviewer_name = author.get("name", "") if isinstance(author, dict) else ""
 
-    Review.objects.update_or_create(
+    return Review.objects.update_or_create(
         channex_id=f"booking_{review_id}",
         defaults={
             "property_id": property_obj.booking_hotel_id,
@@ -110,18 +115,17 @@ def _upsert_booking_review(item: dict, property_obj: Property) -> bool:
             "raw_data": item,
         },
     )
-    return True
 
 
-def _upsert_expedia_review(raw: dict, property_obj: Property) -> bool:
+def _upsert_expedia_review(raw: dict, property_obj: Property) -> tuple[Review, bool] | None:
     norm = normalize_expedia_review(raw)
     if not norm:
-        return False
+        return None
     reviewed_at = norm["reviewed_at"]
     if isinstance(reviewed_at, str):
         reviewed_at = parse_datetime(reviewed_at)
 
-    Review.objects.update_or_create(
+    return Review.objects.update_or_create(
         channex_id=f"expedia_{norm['external_id']}",
         defaults={
             "property_id": property_obj.expedia_property_id,
@@ -141,12 +145,27 @@ def _upsert_expedia_review(raw: dict, property_obj: Property) -> bool:
             "raw_data": norm["raw_data"],
         },
     )
-    return True
 
 
-def _sync_booking_reviews(property_obj: Property) -> int:
+def _collect_upserts(raw_reviews, upsert, property_obj: Property) -> tuple[int, list[Review]]:
+    """Run ``upsert`` over raw payloads; count successes and gather brand-new
+    negative reviews for the alert email."""
+    synced = 0
+    new_negatives: list[Review] = []
+    for item in raw_reviews:
+        result = upsert(item, property_obj)
+        if result is None:
+            continue
+        synced += 1
+        review, created = result
+        if created and _is_negative(review):
+            new_negatives.append(review)
+    return synced, new_negatives
+
+
+def _sync_booking_reviews(property_obj: Property) -> tuple[int, list[Review]]:
     if not property_obj.booking_hotel_id:
-        return 0
+        return 0, []
     # Build the set of review IDs already in our DB so the client can early-break
     # on the first page where every review is already known.
     known_ids = {
@@ -160,7 +179,7 @@ def _sync_booking_reviews(property_obj: Property) -> int:
         hotel_id=int(property_obj.booking_hotel_id),
         known_ids=known_ids,
     )
-    synced = sum(1 for item in raw_reviews if _upsert_booking_review(item, property_obj))
+    synced, new_negatives = _collect_upserts(raw_reviews, _upsert_booking_review, property_obj)
     logger.info(
         "Booking sync for %s (%s): %d reviews fetched (incremental from %d known)",
         property_obj.property_name,
@@ -168,12 +187,12 @@ def _sync_booking_reviews(property_obj: Property) -> int:
         synced,
         len(known_ids),
     )
-    return synced
+    return synced, new_negatives
 
 
-def _sync_expedia_reviews(property_obj: Property) -> int:
+def _sync_expedia_reviews(property_obj: Property) -> tuple[int, list[Review]]:
     if not property_obj.expedia_property_id:
-        return 0
+        return 0, []
     known_ids = {
         cid.split("_", 1)[1] if cid.startswith("expedia_") else cid
         for cid in Review.objects.filter(
@@ -189,8 +208,8 @@ def _sync_expedia_reviews(property_obj: Property) -> int:
         logger.warning(
             "Skipping Expedia sync for %s: %s", property_obj.property_name, exc
         )
-        return 0
-    synced = sum(1 for item in raw_reviews if _upsert_expedia_review(item, property_obj))
+        return 0, []
+    synced, new_negatives = _collect_upserts(raw_reviews, _upsert_expedia_review, property_obj)
     logger.info(
         "Expedia sync for %s (%s): %d reviews fetched (incremental from %d known)",
         property_obj.property_name,
@@ -198,18 +217,18 @@ def _sync_expedia_reviews(property_obj: Property) -> int:
         synced,
         len(known_ids),
     )
-    return synced
+    return synced, new_negatives
 
 
-def _upsert_google_review(raw: dict, property_obj: Property) -> bool:
+def _upsert_google_review(raw: dict, property_obj: Property) -> tuple[Review, bool] | None:
     norm = normalize_google_review(raw)
     if not norm:
-        return False
+        return None
     reviewed_at = norm["reviewed_at"]
     if isinstance(reviewed_at, str):
         reviewed_at = parse_datetime(reviewed_at)
 
-    Review.objects.update_or_create(
+    return Review.objects.update_or_create(
         channex_id=f"google_{norm['external_id']}",
         defaults={
             "property_id": property_obj.google_place_id,
@@ -229,44 +248,46 @@ def _upsert_google_review(raw: dict, property_obj: Property) -> bool:
             "raw_data": norm["raw_data"],
         },
     )
-    return True
 
 
-def _sync_google_reviews(property_obj: Property) -> int:
+def _sync_google_reviews(property_obj: Property) -> tuple[int, list[Review]]:
     if not property_obj.google_place_id:
-        return 0
+        return 0, []
     client = GooglePlacesClient()
     if not client.is_configured():
         logger.info(
             "Skipping Google sync for %s — GOOGLE_PLACES_API_KEY not set.",
             property_obj.property_name,
         )
-        return 0
+        return 0, []
     try:
         raw_reviews = client.fetch_all_reviews(property_obj.google_place_id)
     except GoogleNotConfiguredError:
-        return 0
+        return 0, []
     except Exception as exc:
         logger.warning("Google sync failed for %s: %s", property_obj.property_name, exc)
-        return 0
-    synced = sum(1 for item in raw_reviews if _upsert_google_review(item, property_obj))
+        return 0, []
+    synced, new_negatives = _collect_upserts(raw_reviews, _upsert_google_review, property_obj)
     logger.info(
         "Google sync for %s (%s): %d reviews upserted",
         property_obj.property_name,
         property_obj.google_place_id,
         synced,
     )
-    return synced
+    return synced, new_negatives
 
 
 def _sync_property(property_obj: Property) -> int:
     """Sync reviews from every OTA the property has connected. Returns total upserts."""
     total = 0
-    total += _sync_booking_reviews(property_obj)
-    total += _sync_expedia_reviews(property_obj)
-    total += _sync_google_reviews(property_obj)
+    new_negatives: list[Review] = []
+    for sync in (_sync_booking_reviews, _sync_expedia_reviews, _sync_google_reviews):
+        synced, negatives = sync(property_obj)
+        total += synced
+        new_negatives.extend(negatives)
     property_obj.last_synced_at = timezone.now()
     property_obj.save(update_fields=["last_synced_at", "updated_at"])
+    send_negative_review_alert(property_obj, new_negatives)
     return total
 
 
@@ -283,6 +304,18 @@ def sync_reviews_for_property(self, property_id: str):
     except Exception as exc:
         logger.error("Booking sync failed for property %s: %s", property_id, exc)
         raise self.retry(exc=exc, countdown=60)
+
+
+@shared_task()
+def send_rate_opportunity_alerts():
+    """Daily: email Pro users when high-demand dates are priced below market.
+
+    Implementation lives in reviews/rate_alerts.py; registered here so celery
+    autodiscovery picks it up.
+    """
+    from reptruly.reviews.rate_alerts import send_rate_opportunity_alerts as run
+
+    return run()
 
 
 @shared_task(bind=True, max_retries=3)

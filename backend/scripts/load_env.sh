@@ -1,7 +1,7 @@
 #!/bin/bash
 # load .env file from a path to .env i.e. $1
 # https://gist.github.com/mihow/9c7f559807069a03e302605691f85572?permalink_comment_id=4494251#gistcomment-4494251\
-ENV_VARS="$(cat $1 | awk '!/^\s*#/' | awk '!/^\s*$/')"
+ENV_VARS="$(cat $1 | awk '!/^[[:space:]]*#/' | awk '!/^[[:space:]]*$/')"
 
 eval "$(
   printf '%s\n' "$ENV_VARS" | while IFS='' read -r line; do

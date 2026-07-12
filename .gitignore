@@ -296,3 +296,8 @@ reptruly/media/
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
+
+# Local dev artifacts (agent screenshots, browser traces, assistant config)
+/*.png
+.playwright-mcp/
+.claude/

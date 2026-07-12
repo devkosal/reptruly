@@ -20,11 +20,14 @@ django-cors-headers==4.9.0
 django-storages[boto3]==1.14.6
 
 # Django Ninja API
+django-ninja==1.5.3
 django-ninja-extra==0.30.9
 ninja-api-key==2.0.0
 
 # Payments
 dj-stripe==2.10.3
+# stripe 15 drops dict-style StripeObject, which dj-stripe 2.10 relies on
+stripe==14.4.1
 
 # ASGI Server
 uvicorn[standard]==0.33.0
@@ -32,6 +35,15 @@ uvicorn[standard]==0.33.0
 # AWS
 boto3==1.37.38
 git+https://github.com/devkosal/django-allow-cidr-async.git@d63a73f
+
+# HTTP Client
+httpx==0.28.1
+
+# OpenAI
+openai==1.82.0
+
+# Holidays
+holidays==0.55
 
 # Utils
 python-dotenv==1.0.1

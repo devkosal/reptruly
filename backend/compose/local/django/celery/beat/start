@@ -3,8 +3,14 @@
 set -o errexit
 set -o nounset
 
-# we don't want to run this prior to migration since celery tables will not be available
-wait-for-it -s django:5000 -t 600 -- echo "django is up"
+# Wait for django (and its migrations) to be ready before starting beat —
+# celery_beat needs the django_celery_beat tables.
+echo "Waiting for django:5000..."
+# Any HTTP response (even 400) means django is up. We just need TCP/HTTP connectivity.
+until curl -s -o /dev/null -w "%{http_code}" http://django:5000/ | grep -qE '^[0-9]+$'; do
+  sleep 2
+done
+echo "django is up"
 
 rm -f './celerybeat.pid'
 exec watchfiles celery.__main__.main --args '-A config.celery_app beat -l INFO'

@@ -4,6 +4,7 @@ from django.db.models import (
     SET_NULL,
     BooleanField,
     CharField,
+    EmailField,
     ForeignKey,
     OneToOneField,
     TextChoices,
@@ -27,6 +28,7 @@ class User(UUIDModel, AbstractUser):
     first_name = None  # type: ignore
     last_name = None  # type: ignore
     customer = OneToOneField(Customer, null=True, blank=True, on_delete=SET_NULL)
+    email_verified = BooleanField(_("Email Verified"), default=False)
 
     # Profile fields surfaced to the dashboard onboarding flow.
     company_name = CharField(_("Company / Hotel group"), blank=True, max_length=255)
@@ -76,14 +78,34 @@ class Preferences(UUIDModel):
     )
     receive_marketing_emails = BooleanField(
         "Receive Marketing Emails",
-        default=True,
+        default=False,
         help_text="Receive emails about promotions.",
     )
     receive_product_update_emails = BooleanField(
         "Receive Product Update Emails",
-        default=True,
+        default=False,
         help_text="Receive emails when we add new features.",
     )
+
+    # Email notification preferences, surfaced in Settings → Notifications.
+    # Alerts go to alert_email when set, otherwise the account email.
+    alert_email = EmailField(
+        _("Alert email override"),
+        blank=True,
+        help_text="Send alerts to this address instead of the account email.",
+    )
+    notify_new_reviews = BooleanField(_("Email on new reviews"), default=True)
+    notify_negative_reviews = BooleanField(
+        _("Instant alert on negative reviews"), default=True
+    )
+    notify_daily_digest = BooleanField(_("Daily digest"), default=False)
+    notify_weekly_summary = BooleanField(_("Weekly summary"), default=True)
+    notify_rate_changes = BooleanField(_("Rate movement alerts"), default=True)
+    notify_sync_failures = BooleanField(_("Sync failure alerts"), default=True)
+
+    @property
+    def alert_recipient(self) -> str:
+        return self.alert_email or self.user.email
 
     def __str__(self):
         return f"{self.user.username}'s Preferences"
