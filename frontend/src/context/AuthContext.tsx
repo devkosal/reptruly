@@ -12,6 +12,7 @@ export interface User {
   state: string
   country: string
   profile_completed: boolean
+  email_verified: boolean
 }
 
 interface SignupData {
@@ -59,6 +60,7 @@ function hydrate(raw: any): User {
     state: raw.state ?? '',
     country: raw.country ?? '',
     profile_completed: !!raw.profile_completed,
+    email_verified: !!raw.email_verified,
   }
 }
 

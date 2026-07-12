@@ -67,7 +67,8 @@ export default function SyncFooter({ domain, actionLabel }: SyncFooterProps) {
 
   const running = row?.status === 'running' || busy
   const failed = row?.status === 'failed'
-  const dotColor = failed ? '#ef4444' : running ? '#f59e0b' : '#10b981'
+  const dotColor = failed ? 'var(--bad)' : running ? 'var(--warn)' : 'var(--good)'
+  const dotGlow = failed ? 'rgba(225,29,72,0.15)' : running ? 'rgba(217,119,6,0.15)' : 'rgba(5,150,105,0.15)'
   const statusLabel = failed
     ? 'Last sync failed'
     : running
@@ -79,45 +80,44 @@ export default function SyncFooter({ domain, actionLabel }: SyncFooterProps) {
       marginTop: 24,
       padding: '14px 18px',
       borderRadius: 14,
-      background: 'rgba(255,255,255,0.7)',
-      border: '1px solid #f3e8ff',
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 16,
       flexWrap: 'wrap',
-      backdropFilter: 'blur(6px)',
-      boxShadow: '0 1px 3px rgba(168,85,247,0.05)',
+      boxShadow: 'var(--shadow-sm)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
         <span style={{
           width: 9, height: 9, borderRadius: '50%', background: dotColor,
-          boxShadow: `0 0 0 4px ${dotColor}22`,
+          boxShadow: `0 0 0 4px ${dotGlow}`,
           animation: running ? 'sync-pulse 1.4s ease-in-out infinite' : undefined,
           flexShrink: 0,
         }} />
         <div style={{ minWidth: 0 }}>
           <div style={{
-            fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
-            color: '#7c3aed',
+            fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: 'var(--text-faint)',
           }}>
             {DOMAIN_LABEL[domain]} sync
           </div>
-          <div style={{ fontSize: 13, color: '#1f2937', fontWeight: 600, marginTop: 1 }}>
+          <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600, marginTop: 1 }}>
             {statusLabel}
             {row?.last_synced_at && !running && (
-              <span style={{ color: '#6b7280', fontWeight: 500, marginLeft: 6 }}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 500, marginLeft: 6 }}>
                 · {formatAbsolute(row.last_synced_at)}
               </span>
             )}
           </div>
           {failed && row?.last_error && (
-            <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 3 }}>
+            <div style={{ fontSize: 11, color: 'var(--bad)', marginTop: 3 }}>
               {row.last_error.slice(0, 200)}
             </div>
           )}
           {error && (
-            <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 3 }}>{error}</div>
+            <div style={{ fontSize: 11, color: 'var(--bad)', marginTop: 3 }}>{error}</div>
           )}
         </div>
       </div>
@@ -125,21 +125,8 @@ export default function SyncFooter({ domain, actionLabel }: SyncFooterProps) {
         type="button"
         onClick={onForceSync}
         disabled={running}
-        style={{
-          background: running
-            ? '#f3f4f6'
-            : 'linear-gradient(135deg, #a855f7 0%, #ec4899 100%)',
-          color: running ? '#9ca3af' : '#fff',
-          border: 'none',
-          padding: '8px 16px',
-          borderRadius: 8,
-          fontSize: 12,
-          fontWeight: 700,
-          letterSpacing: '0.02em',
-          cursor: running ? 'wait' : 'pointer',
-          boxShadow: running ? 'none' : '0 3px 10px rgba(168,85,247,0.3)',
-          flexShrink: 0,
-        }}
+        className={running ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'}
+        style={{ cursor: running ? 'wait' : 'pointer', flexShrink: 0 }}
       >
         {running ? 'Syncing…' : actionLabel || `Sync ${DOMAIN_LABEL[domain].toLowerCase()} now`}
       </button>

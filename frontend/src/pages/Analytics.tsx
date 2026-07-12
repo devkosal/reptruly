@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useProperty } from '../context/PropertyContext'
 import SyncFooter from '../components/SyncFooter'
 import ThemedPage from '../components/ThemedPage'
+import UpgradeNotice, { isUpgradeBlocked } from '../components/UpgradeNotice'
+import { fetchBillingStatus } from '../api/billing'
 
 interface OTAStats {
   total: number
@@ -56,17 +58,18 @@ function PerOTAStat({
 }) {
   return (
     <div style={{ marginBottom: 8 }}>
-      <div style={{ fontSize: 11, color: '#6b7280' }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{label}</div>
       <div style={{
         fontSize: highlight ? 18 : 15,
         fontWeight: highlight ? 700 : 600,
-        color: '#111827',
+        color: 'var(--ink)',
         display: 'flex',
         alignItems: 'baseline',
         gap: 6,
+        fontVariantNumeric: 'tabular-nums',
       }}>
         {value}
-        {sub && <span style={{ fontSize: 11, fontWeight: 400, color: '#9ca3af' }}>{sub}</span>}
+        {sub && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-faint)' }}>{sub}</span>}
       </div>
     </div>
   )
@@ -74,7 +77,7 @@ function PerOTAStat({
 
 function VerticalBarChart({
   data,
-  color = '#6c63ff',
+  color = 'var(--accent)',
   colors,
   unit = '',
   rotateLabels = false,
@@ -112,7 +115,7 @@ function VerticalBarChart({
             justifyContent: 'flex-end',
             position: 'relative',
           }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 4, lineHeight: 1 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
               {value > 0 ? (unit === '/10' ? value.toFixed(1) : value) : ''}
             </div>
             <div style={{
@@ -120,7 +123,7 @@ function VerticalBarChart({
               flex: 1,
               display: 'flex',
               alignItems: 'flex-end',
-              background: '#f1f5f9',
+              background: 'var(--surface-2)',
               borderRadius: 4,
             }}>
               <div style={{
@@ -134,7 +137,7 @@ function VerticalBarChart({
             </div>
             <div style={{
               fontSize: 11,
-              color: '#9ca3af',
+              color: 'var(--text-faint)',
               marginTop: 6,
               textAlign: 'center',
               whiteSpace: 'nowrap',
@@ -173,6 +176,7 @@ function AISummaryCard({
   const [summary, setSummary] = useState<AISummaryData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [upgradeMsg, setUpgradeMsg] = useState('')
   const fetchedFor = useRef<string | null>(undefined)
 
   function fetchSummary() {
@@ -180,6 +184,7 @@ function AISummaryCard({
     if (fetchedFor.current === key) return
     setLoading(true)
     setError('')
+    setUpgradeMsg('')
     setSummary(null)
     const params = new URLSearchParams()
     if (propertyName) params.set('property_name', propertyName)
@@ -187,8 +192,16 @@ function AISummaryCard({
     if (toDate) params.set('to_date', toDate)
     const qs = params.toString() ? `?${params}` : ''
     fetch(`/api/reviews/analytics/ai-summary${qs}`)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(d => { setSummary(d); fetchedFor.current = key })
+      .then(async r => {
+        if (isUpgradeBlocked(r.status)) {
+          const j = await r.json().catch(() => ({}))
+          setUpgradeMsg(j.detail || j.message || 'AI summaries are a Pro feature.')
+          return null
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then(d => { if (d) { setSummary(d); fetchedFor.current = key } })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }
@@ -201,12 +214,12 @@ function AISummaryCard({
   }, [propertyName, fromDate, toDate])
 
   return (
-    <div className="card" style={{ gridColumn: '1 / -1', marginBottom: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: summary || loading ? 16 : 0 }}>
+    <div className="card" style={{ gridColumn: '1 / -1', marginBottom: 0, borderLeft: '3px solid var(--accent)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: summary || loading ? 16 : 0 }}>
         <div>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 2 }}>AI Review Summary</h3>
+          <div className="section-title" style={{ marginBottom: 2 }}>AI Review Summary</div>
           {!summary && !loading && (
-            <p style={{ fontSize: 12, color: '#9ca3af' }}>GPT-4o analysis of top positives and problems from guest reviews</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>GPT-4o analysis of top positives and problems from guest reviews</p>
           )}
         </div>
         <button
@@ -215,33 +228,34 @@ function AISummaryCard({
           disabled={loading}
           style={{ flexShrink: 0 }}
         >
-          {loading ? 'Analysing…' : summary ? '↻ Refresh' : '✦ Summarise Reviews'}
+          {loading ? 'Analysing…' : summary ? 'Refresh' : 'Summarise reviews'}
         </button>
       </div>
 
+      {upgradeMsg && <div style={{ marginTop: 8 }}><UpgradeNotice message={upgradeMsg} /></div>}
       {error && <div className="error-msg" style={{ marginTop: 8 }}>{error}</div>}
 
       {loading && (
-        <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
+        <div style={{ color: 'var(--text-faint)', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
           Analysing {propertyName ? `${propertyName}` : 'all properties'} reviews with GPT-4o…
         </div>
       )}
 
       {summary && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, padding: '14px 16px' }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#166534', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          <div style={{ background: 'var(--good-soft)', border: '1px solid #c4ebda', borderRadius: 10, padding: '14px 16px' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--good)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               ✓ Top Positives
             </div>
-            <div style={{ fontSize: 13, color: '#15803d', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{summary.positives}</div>
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{summary.positives}</div>
           </div>
-          <div style={{ background: '#fff7f7', border: '1px solid #fca5a5', borderRadius: 8, padding: '14px 16px' }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#991b1b', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          <div style={{ background: 'var(--bad-soft)', border: '1px solid #f6c9d3', borderRadius: 10, padding: '14px 16px' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--bad)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               ✗ Top Problems
             </div>
-            <div style={{ fontSize: 13, color: '#b91c1c', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{summary.problems}</div>
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{summary.problems}</div>
           </div>
-          <div style={{ gridColumn: '1 / -1', fontSize: 11, color: '#9ca3af', textAlign: 'right' }}>
+          <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--text-faint)', textAlign: 'right' }}>
             Based on {summary.review_count} reviews · Powered by GPT-4o mini
           </div>
         </div>
@@ -261,17 +275,13 @@ interface TopicScore {
   priority: Priority
 }
 
-function priorityStyle(p: Priority): React.CSSProperties {
-  const base: React.CSSProperties = {
-    display: 'inline-block', padding: '3px 10px', borderRadius: 999,
-    fontSize: 11, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase',
-    border: '1px solid',
-    whiteSpace: 'nowrap',
-  }
-  if (p === 'high') return { ...base, background: '#fee2e2', color: '#991b1b', borderColor: '#fca5a5' }
-  if (p === 'medium') return { ...base, background: '#fef3c7', color: '#92400e', borderColor: '#fcd34d' }
-  return { ...base, background: '#dcfce7', color: '#166534', borderColor: '#86efac' }
+// Semantic chips: high priority = needs attention (rose), medium = amber, low = fine (emerald).
+function priorityChipClass(p: Priority): string {
+  if (p === 'high') return 'chip chip-bad'
+  if (p === 'medium') return 'chip chip-warn'
+  return 'chip chip-good'
 }
+
 interface TopicScoresData {
   review_count: number
   topics: TopicScore[]
@@ -279,17 +289,18 @@ interface TopicScoresData {
 }
 
 function topicBarStyle(score: number | null): { fill: string; track: string; text: string } {
-  if (score === null) return { fill: '#e5e7eb', track: '#f3f4f6', text: '#9ca3af' }
-  if (score >= 8)  return { fill: 'linear-gradient(90deg, #10b981, #34d399)', track: '#ecfdf5', text: '#065f46' }
-  if (score >= 6)  return { fill: 'linear-gradient(90deg, #84cc16, #a3e635)', track: '#f7fee7', text: '#3f6212' }
-  if (score >= 4)  return { fill: 'linear-gradient(90deg, #f59e0b, #fbbf24)', track: '#fffbeb', text: '#92400e' }
-  return                { fill: 'linear-gradient(90deg, #ef4444, #f87171)', track: '#fef2f2', text: '#991b1b' }
+  if (score === null) return { fill: 'var(--border-strong)', track: 'var(--surface-2)', text: 'var(--text-faint)' }
+  if (score >= 8)  return { fill: 'var(--good)', track: 'var(--good-soft)', text: 'var(--good)' }
+  if (score >= 6)  return { fill: 'var(--cyan)', track: 'rgba(8,145,178,0.12)', text: 'var(--cyan)' }
+  if (score >= 4)  return { fill: 'var(--warn)', track: 'var(--warn-soft)', text: 'var(--warn)' }
+  return                { fill: 'var(--bad)', track: 'var(--bad-soft)', text: 'var(--bad)' }
 }
 
 function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: string | null; fromDate: string; toDate: string }) {
   const [data, setData] = useState<TopicScoresData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [upgradeMsg, setUpgradeMsg] = useState('')
   const fetchedFor = useRef<string | null>(undefined)
 
   function fetchTopics(force = false) {
@@ -297,6 +308,7 @@ function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: str
     if (!force && fetchedFor.current === key) return
     setLoading(true)
     setError('')
+    setUpgradeMsg('')
     setData(null)
     const params = new URLSearchParams()
     if (propertyName) params.set('property_name', propertyName)
@@ -306,13 +318,18 @@ function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: str
     const qs = params.toString() ? `?${params}` : ''
     fetch(`/api/reviews/analytics/topics${qs}`)
       .then(async r => {
+        if (isUpgradeBlocked(r.status)) {
+          const j = await r.json().catch(() => ({}))
+          setUpgradeMsg(j.detail || j.message || 'AI topic scores are a Pro feature.')
+          return null
+        }
         if (!r.ok) {
           const j = await r.json().catch(() => ({}))
           throw new Error(j.message || `HTTP ${r.status}`)
         }
         return r.json()
       })
-      .then(d => { setData(d); fetchedFor.current = key })
+      .then(d => { if (d) { setData(d); fetchedFor.current = key } })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }
@@ -325,14 +342,12 @@ function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: str
   }, [propertyName, fromDate, toDate])
 
   return (
-    <div className="card" style={{ gridColumn: '1 / -1', marginTop: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: data || loading ? 16 : 0 }}>
+    <div className="card" style={{ gridColumn: '1 / -1', marginTop: 16, borderLeft: '3px solid var(--accent)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: data || loading ? 16 : 0 }}>
         <div>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 2 }}>
-            Category Breakdown
-          </h3>
+          <div className="section-title" style={{ marginBottom: 2 }}>Category Breakdown</div>
           {!data && !loading && (
-            <p style={{ fontSize: 12, color: '#9ca3af' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               Per-category sentiment with mentions, score and priority — cleanliness, housekeeping, staff, beds,
               breakfast, pool & amenities, maintenance, safety, location, value for money.
             </p>
@@ -344,14 +359,15 @@ function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: str
           disabled={loading}
           style={{ flexShrink: 0 }}
         >
-          {loading ? 'Scoring…' : data ? '↻ Refresh' : '✦ Run analysis'}
+          {loading ? 'Scoring…' : data ? 'Refresh' : 'Run analysis'}
         </button>
       </div>
 
+      {upgradeMsg && <div style={{ marginTop: 8 }}><UpgradeNotice message={upgradeMsg} /></div>}
       {error && <div className="error-msg" style={{ marginTop: 8 }}>{error}</div>}
 
       {loading && (
-        <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
+        <div style={{ color: 'var(--text-faint)', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
           Analysing {propertyName ? `${propertyName}'s` : 'all'} recent reviews with GPT-4o mini across 10 categories…
         </div>
       )}
@@ -366,29 +382,23 @@ function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: str
             })
             return (
               <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-                <div style={{ ...priorityStyle('high'), fontSize: 12 }}>{counts.high} HIGH</div>
-                <div style={{ ...priorityStyle('medium'), fontSize: 12 }}>{counts.medium} MEDIUM</div>
-                <div style={{ ...priorityStyle('low'), fontSize: 12 }}>{counts.low} LOW</div>
+                <span className={priorityChipClass('high')} style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>{counts.high} high</span>
+                <span className={priorityChipClass('medium')} style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>{counts.medium} medium</span>
+                <span className={priorityChipClass('low')} style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>{counts.low} low</span>
               </div>
             )
           })()}
 
           {/* Table */}
-          <div style={{
-            border: '1px solid #f3e8ff', borderRadius: 12, overflow: 'hidden',
-            background: 'linear-gradient(180deg, #ffffff 0%, #fdf4ff 100%)',
-          }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+            <table style={{ fontSize: 13 }}>
               <thead>
-                <tr style={{
-                  background: 'linear-gradient(90deg, #fdf2f8 0%, #f3e8ff 100%)',
-                  borderBottom: '1px solid #e9d5ff',
-                }}>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Category</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Score</th>
-                  <th style={{ textAlign: 'right', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Mentions</th>
-                  <th style={{ textAlign: 'center', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Priority</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 700, color: '#6d28d9', fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase' }}>What guests say</th>
+                <tr>
+                  <th>Category</th>
+                  <th>Score</th>
+                  <th style={{ textAlign: 'right' }}>Mentions</th>
+                  <th style={{ textAlign: 'center' }}>Priority</th>
+                  <th>What guests say</th>
                 </tr>
               </thead>
               <tbody>
@@ -400,23 +410,20 @@ function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: str
                     const sa = a.score ?? 99, sb = b.score ?? 99
                     return sa - sb
                   })
-                  .map((t, idx) => {
+                  .map(t => {
                     const colors = topicBarStyle(t.score)
                     const pct = t.score === null ? 0 : (t.score / 10) * 100
                     return (
-                      <tr key={t.topic} style={{
-                        background: idx % 2 === 0 ? '#fff' : '#fdfaff',
-                        borderBottom: idx === data.topics.length - 1 ? 'none' : '1px solid #f3e8ff',
-                      }}>
-                        <td style={{ padding: '12px 14px', fontWeight: 600, color: '#1a1a2e', verticalAlign: 'middle' }}>
+                      <tr key={t.topic}>
+                        <td style={{ fontWeight: 600, color: 'var(--ink)', verticalAlign: 'middle' }}>
                           {t.label}
                         </td>
-                        <td style={{ padding: '12px 14px', verticalAlign: 'middle', minWidth: 160 }}>
+                        <td style={{ verticalAlign: 'middle', minWidth: 160 }}>
                           {t.score === null ? (
-                            <span style={{ fontSize: 12, color: '#9ca3af' }}>—</span>
+                            <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>—</span>
                           ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span style={{ fontSize: 14, fontWeight: 800, color: colors.text, fontVariantNumeric: 'tabular-nums', minWidth: 30 }}>
+                              <span style={{ fontSize: 14, fontWeight: 750, color: colors.text, fontVariantNumeric: 'tabular-nums', minWidth: 30 }}>
                                 {t.score.toFixed(1)}
                               </span>
                               <div style={{ flex: 1, height: 6, background: colors.track, borderRadius: 3, overflow: 'hidden', minWidth: 70 }}>
@@ -425,14 +432,14 @@ function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: str
                             </div>
                           )}
                         </td>
-                        <td style={{ padding: '12px 14px', textAlign: 'right', color: '#1f2937', verticalAlign: 'middle', fontVariantNumeric: 'tabular-nums' }}>
+                        <td style={{ textAlign: 'right', color: 'var(--text)', verticalAlign: 'middle', fontVariantNumeric: 'tabular-nums' }}>
                           {t.mentions}
                         </td>
-                        <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle' }}>
-                          <span style={priorityStyle(t.priority)}>{t.priority}</span>
+                        <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                          <span className={priorityChipClass(t.priority)} style={{ textTransform: 'uppercase', letterSpacing: '0.04em', fontSize: 11 }}>{t.priority}</span>
                         </td>
-                        <td style={{ padding: '12px 14px', color: '#374151', lineHeight: 1.5, verticalAlign: 'middle' }}>
-                          {t.note || <span style={{ color: '#9ca3af' }}>—</span>}
+                        <td style={{ color: 'var(--text-muted)', lineHeight: 1.5, verticalAlign: 'middle' }}>
+                          {t.note || <span style={{ color: 'var(--text-faint)' }}>—</span>}
                         </td>
                       </tr>
                     )
@@ -441,7 +448,7 @@ function TopicScoresCard({ propertyName, fromDate, toDate }: { propertyName: str
             </table>
           </div>
 
-          <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'right', marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', textAlign: 'right', marginTop: 12 }}>
             Based on the latest {data.review_count} reviews{data.cached ? ' · cached' : ''} · Priority blends score and mention volume · Powered by GPT-4o mini
           </div>
         </div>
@@ -455,6 +462,14 @@ const OTA_COLORS: Record<string, string> = {
   'Booking.com': '#003580',
   Expedia: '#f5a623',
   Google: '#34a853',
+}
+
+// Maps OTA names to the shared .ota-badge chip classes in styles.css.
+const OTA_BADGE_CLASS: Record<string, string> = {
+  Airbnb: 'ota-airbnb',
+  'Booking.com': 'ota-booking',
+  Expedia: 'ota-expedia',
+  Google: 'ota-google',
 }
 
 interface AnalyticsView {
@@ -512,6 +527,20 @@ function buildOTAView(ota: string, data: AnalyticsData, trends: TrendsData): Ana
 
 type ViewMode = 'overview' | 'insights'
 
+// Report time-period presets — drives the `days` param passed to the report page.
+const REPORT_PERIODS: { value: string; label: string }[] = [
+  { value: '1', label: 'Today (last 24h)' },
+  { value: '2', label: 'Last 2 days' },
+  { value: '3', label: 'Last 3 days' },
+  { value: '7', label: 'Last 7 days (weekly)' },
+  { value: '14', label: 'Last 14 days' },
+  { value: '30', label: 'Last 30 days (monthly)' },
+  { value: '90', label: 'Last 3 months' },
+  { value: '180', label: 'Last 6 months' },
+  { value: '365', label: 'Last 12 months (yearly)' },
+  { value: 'custom', label: 'Custom range…' },
+]
+
 function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
   const navigate = useNavigate()
   const [data, setData] = useState<AnalyticsData | null>(null)
@@ -525,6 +554,19 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
   // Date-range filter — applied to all analytics fetches (summary, trends, AI summary).
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  // Report time period — a preset number of days back, or 'custom' to use an explicit date range.
+  const [reportDays, setReportDays] = useState('30')
+  // Custom report range (only used when reportDays === 'custom').
+  const [reportFrom, setReportFrom] = useState('')
+  const [reportTo, setReportTo] = useState('')
+  // Whether the plan includes the AI sections of the report (Pro).
+  const [aiLocked, setAiLocked] = useState(false)
+
+  useEffect(() => {
+    fetchBillingStatus()
+      .then(s => { if (s) setAiLocked(!s.limits.ai_enabled) })
+      .catch(() => {})
+  }, [])
 
   // Only treat a date as "set" when it parses as a complete YYYY-MM-DD string. This stops
   // mid-typing partials (e.g. "2026-05-") from reaching the server and triggering bogus refetches.
@@ -583,106 +625,165 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
     return null
   }
 
-  const tabAccent = isAllTab ? '#6c63ff' : (otaColors[activeTab] || '#6c63ff')
+  const tabAccent = isAllTab ? 'var(--accent)' : (otaColors[activeTab] || 'var(--accent)')
   const replyRate = view.reply_rate
 
   const hasDateFilter = !!(fromDate || toDate)
 
+  const isCustomReport = reportDays === 'custom'
+  // For a custom range both dates must be complete before the report can be generated.
+  const customReportReady = isCompleteDate(reportFrom) && isCompleteDate(reportTo) && reportFrom <= reportTo
+  const reportReady = !isCustomReport || customReportReady
+
+  const reportQuery = isCustomReport
+    ? `from=${reportFrom}&to=${reportTo}`
+    : `days=${reportDays}`
+  const reportHref = propertyName
+    ? `/analytics/report?${reportQuery}&property=${encodeURIComponent(propertyName)}`
+    : `/analytics/report?${reportQuery}`
+
+  const reportPeriodLabel = isCustomReport
+    ? (customReportReady ? `${reportFrom} → ${reportTo}` : 'custom range')
+    : (REPORT_PERIODS.find(p => p.value === reportDays)?.label ?? `last ${reportDays} days`)
+
   return (
     <>
-      {/* Date-range filter — applies to all analytics on this page */}
-      <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'flex-end',
-        gap: 12,
-        marginBottom: 16,
-        padding: '12px 14px',
-        background: '#fff',
-        border: '1px solid #e5e7eb',
-        borderRadius: 10,
+      {/* Report CTA — generate a PDF spanning the selected period. */}
+      <div className="card" style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+        marginBottom: 16, flexWrap: 'wrap',
       }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', alignSelf: 'center' }}>
-          Date range
-        </div>
         <div>
-          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>From</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+            <div className="section-title" style={{ marginBottom: 0 }}>Analytics report</div>
+            {aiLocked && (
+              <span className="chip chip-accent" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                AI sections: Pro
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            {aiLocked
+              ? <>Property name, per-OTA stats, and trends — for the {reportPeriodLabel.toLowerCase()}. Downloads as PDF. Upgrade to Pro to add AI insights and topic scores.</>
+              : <>Property name, per-OTA stats, AI insights, and topic scores — for the {reportPeriodLabel.toLowerCase()}. Downloads as PDF.</>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <label htmlFor="report-period" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Period
+          </label>
+          <select
+            id="report-period"
+            className="filter-select"
+            value={reportDays}
+            onChange={e => setReportDays(e.target.value)}
+            style={{ fontSize: 13, fontWeight: 600, padding: '7px 10px', cursor: 'pointer' }}
+          >
+            {REPORT_PERIODS.map(p => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+          {isCustomReport && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <input
+                type="date"
+                aria-label="Report start date"
+                className="filter-input"
+                value={reportFrom}
+                max={reportTo || undefined}
+                onChange={e => setReportFrom(e.target.value)}
+                style={{ padding: '7px 9px', fontSize: 12 }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>→</span>
+              <input
+                type="date"
+                aria-label="Report end date"
+                className="filter-input"
+                value={reportTo}
+                min={reportFrom || undefined}
+                onChange={e => setReportTo(e.target.value)}
+                style={{ padding: '7px 9px', fontSize: 12 }}
+              />
+            </div>
+          )}
+          {reportReady ? (
+            <a
+              href={reportHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary btn-sm"
+              style={{ textDecoration: 'none', whiteSpace: 'nowrap', display: 'inline-block' }}
+            >
+              Generate report →
+            </a>
+          ) : (
+            <span
+              title="Pick a valid start and end date"
+              className="btn btn-secondary btn-sm"
+              style={{ opacity: 0.5, cursor: 'not-allowed', whiteSpace: 'nowrap', display: 'inline-block' }}
+            >
+              Generate report →
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Date-range filter — applies to all analytics on this page */}
+      <div className="filters">
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Date range
+        </span>
+        <div>
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>From</label>
           <input
             type="date"
+            className="filter-input"
             value={fromDate}
             max={toDate || undefined}
             onChange={e => setFromDate(e.target.value)}
-            style={{ padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #d1d5db', fontFamily: 'inherit' }}
+            style={{ padding: '7px 10px', fontSize: 13 }}
           />
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>To</label>
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>To</label>
           <input
             type="date"
+            className="filter-input"
             value={toDate}
             min={fromDate || undefined}
             onChange={e => setToDate(e.target.value)}
-            style={{ padding: '7px 10px', fontSize: 13, borderRadius: 6, border: '1px solid #d1d5db', fontFamily: 'inherit' }}
+            style={{ padding: '7px 10px', fontSize: 13 }}
           />
         </div>
         <button
+          className="btn btn-secondary btn-sm"
           onClick={() => { setFromDate(''); setToDate('') }}
           disabled={!hasDateFilter}
-          style={{
-            padding: '8px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6,
-            border: `1px solid ${hasDateFilter ? '#d1d5db' : '#e5e7eb'}`,
-            background: hasDateFilter ? '#f9fafb' : '#f3f4f6',
-            color: hasDateFilter ? '#374151' : '#9ca3af',
-            cursor: hasDateFilter ? 'pointer' : 'not-allowed',
-          }}
+          style={{ alignSelf: 'flex-end' }}
         >
           Clear
         </button>
-        <div style={{ marginLeft: 'auto', fontSize: 11, color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 8 }}>
-          {loading && <span style={{ color: '#6c63ff', fontWeight: 600 }}>↻ Refreshing…</span>}
+        <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {loading && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Refreshing…</span>}
           <span>Filters apply to KPIs, charts and AI summary</span>
         </div>
       </div>
 
       {/* View selector — switches between Overview (KPIs/charts/OTA tabs) and AI Insights */}
-      <div style={{
-        display: 'inline-flex',
-        gap: 4,
-        marginBottom: 18,
-        padding: 4,
-        background: '#fff',
-        border: '1px solid #f3e8ff',
-        borderRadius: 12,
-        boxShadow: '0 1px 3px rgba(168,85,247,0.06)',
-      }}>
+      <div className="seg" style={{ marginBottom: 18 }}>
         {([
-          { key: 'overview' as ViewMode, label: '📊 Overview', sub: 'KPIs, trends, per-OTA' },
-          { key: 'insights' as ViewMode, label: '✦ AI Insights', sub: 'Summary & category breakdown' },
-        ]).map(v => {
-          const active = viewMode === v.key
-          return (
-            <button
-              key={v.key}
-              onClick={() => setViewMode(v.key)}
-              title={v.sub}
-              style={{
-                background: active ? 'linear-gradient(135deg, #ec4899 0%, #a855f7 100%)' : 'transparent',
-                color: active ? '#fff' : '#6d28d9',
-                border: 'none',
-                borderRadius: 9,
-                padding: '10px 18px',
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                boxShadow: active ? '0 4px 12px rgba(168,85,247,0.30)' : 'none',
-                transition: 'background 0.15s',
-              }}
-            >
-              {v.label}
-            </button>
-          )
-        })}
+          { key: 'overview' as ViewMode, label: 'Overview', sub: 'KPIs, trends, per-OTA' },
+          { key: 'insights' as ViewMode, label: 'AI Insights', sub: 'Summary & category breakdown' },
+        ]).map(v => (
+          <button
+            key={v.key}
+            className={`seg-btn${viewMode === v.key ? ' active' : ''}`}
+            onClick={() => setViewMode(v.key)}
+            title={v.sub}
+          >
+            {v.label}
+          </button>
+        ))}
       </div>
 
       {viewMode === 'insights' && (
@@ -700,12 +801,12 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
         gap: 4,
         marginTop: 4,
         marginBottom: 16,
-        borderBottom: '1px solid #e5e7eb',
+        borderBottom: '1px solid var(--border)',
         flexWrap: 'wrap',
       }}>
         {[{ key: 'all', label: 'All OTAs', total: data.total_reviews }, ...otaList.map(([ota, stats]) => ({ key: ota, label: ota, total: stats.total }))].map(t => {
           const active = activeTab === t.key
-          const color = t.key === 'all' ? '#6c63ff' : (otaColors[t.key] || '#6c63ff')
+          const color = t.key === 'all' ? 'var(--accent)' : (otaColors[t.key] || 'var(--accent)')
           return (
             <button
               key={t.key}
@@ -718,7 +819,8 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
                 cursor: 'pointer',
                 fontSize: 13,
                 fontWeight: active ? 700 : 500,
-                color: active ? color : '#6b7280',
+                fontFamily: 'inherit',
+                color: active ? color : 'var(--text-muted)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
@@ -726,7 +828,7 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
             >
               {t.key !== 'all' && <span style={{ width: 8, height: 8, borderRadius: 4, background: color }} />}
               {t.label}
-              <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>({t.total})</span>
+              <span style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 400 }}>({t.total})</span>
             </button>
           )
         })}
@@ -760,8 +862,8 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
       {isAllTab && otaList.length > 0 && (
         <div className="card" style={{ marginTop: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', margin: 0 }}>By OTA</h3>
-            <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>Click any card to view those reviews</p>
+            <div className="section-title" style={{ marginBottom: 0 }}>By OTA</div>
+            <p style={{ fontSize: 12, color: 'var(--text-faint)', margin: 0 }}>Click any card to view those reviews</p>
           </div>
           <div style={{
             display: 'grid',
@@ -774,10 +876,10 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
               onClick={() => openReviews(null)}
               title="View all reviews"
               style={{
-                border: '1px solid #e5e7eb',
-                borderRadius: 8,
+                border: '1px solid var(--border)',
+                borderRadius: 10,
                 padding: 14,
-                background: '#f9fafb',
+                background: 'var(--surface-2)',
                 textAlign: 'left',
                 cursor: 'pointer',
                 font: 'inherit',
@@ -786,18 +888,18 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
               }}
               onMouseEnter={e => {
                 e.currentTarget.style.transform = 'translateY(-2px)'
-                e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,0.08)'
-                e.currentTarget.style.borderColor = '#d1d5db'
+                e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                e.currentTarget.style.borderColor = 'var(--border-strong)'
               }}
               onMouseLeave={e => {
                 e.currentTarget.style.transform = ''
                 e.currentTarget.style.boxShadow = ''
-                e.currentTarget.style.borderColor = '#e5e7eb'
+                e.currentTarget.style.borderColor = 'var(--border)'
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>All OTAs</span>
-                <span style={{ fontSize: 10, color: '#9ca3af' }}>View →</span>
+              <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                <span className="ota-badge ota-default">All OTAs</span>
+                <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>View →</span>
               </div>
               <PerOTAStat label="Reviews" value={data.total_reviews} />
               <PerOTAStat label="Avg score" value={data.avg_score !== null ? `${data.avg_score} / 10` : '—'} highlight />
@@ -805,54 +907,48 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
               <PerOTAStat label="Pending" value={data.pending_reply} />
             </button>
 
-            {otaList.map(([ota, stats]) => {
-              const color = otaColors[ota] || '#6c63ff'
-              return (
-                <button
-                  type="button"
-                  key={ota}
-                  onClick={() => openReviews(ota)}
-                  title={`View ${ota} reviews`}
-                  style={{
-                    border: `1px solid ${color}33`,
-                    borderRadius: 8,
-                    padding: 14,
-                    background: `${color}08`,
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    font: 'inherit',
-                    color: 'inherit',
-                    transition: 'transform 0.12s, box-shadow 0.12s, border-color 0.12s',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.transform = 'translateY(-2px)'
-                    e.currentTarget.style.boxShadow = `0 4px 14px ${color}33`
-                    e.currentTarget.style.borderColor = `${color}66`
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.transform = ''
-                    e.currentTarget.style.boxShadow = ''
-                    e.currentTarget.style.borderColor = `${color}33`
-                  }}
-                >
-                  <div style={{ fontSize: 11, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 4, background: color }} />
-                      {ota}
-                    </span>
-                    <span style={{ fontSize: 10, opacity: 0.7 }}>View →</span>
-                  </div>
-                  <PerOTAStat label="Reviews" value={stats.total} />
-                  <PerOTAStat label="Avg score" value={stats.avg_score !== null ? `${stats.avg_score} / 10` : '—'} highlight />
-                  <PerOTAStat
-                    label="Replied"
-                    value={stats.replied}
-                    sub={stats.reply_rate !== null ? `${stats.reply_rate}%` : '—'}
-                  />
-                  <PerOTAStat label="Pending" value={stats.pending_reply} />
-                </button>
-              )
-            })}
+            {otaList.map(([ota, stats]) => (
+              <button
+                type="button"
+                key={ota}
+                onClick={() => openReviews(ota)}
+                title={`View ${ota} reviews`}
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  padding: 14,
+                  background: 'var(--surface)',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  font: 'inherit',
+                  color: 'inherit',
+                  transition: 'transform 0.12s, box-shadow 0.12s, border-color 0.12s',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.transform = 'translateY(-2px)'
+                  e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                  e.currentTarget.style.borderColor = 'var(--border-strong)'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.transform = ''
+                  e.currentTarget.style.boxShadow = ''
+                  e.currentTarget.style.borderColor = 'var(--border)'
+                }}
+              >
+                <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                  <span className={`ota-badge ${OTA_BADGE_CLASS[ota] || 'ota-default'}`}>{ota}</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>View →</span>
+                </div>
+                <PerOTAStat label="Reviews" value={stats.total} />
+                <PerOTAStat label="Avg score" value={stats.avg_score !== null ? `${stats.avg_score} / 10` : '—'} highlight />
+                <PerOTAStat
+                  label="Replied"
+                  value={stats.replied}
+                  sub={stats.reply_rate !== null ? `${stats.reply_rate}%` : '—'}
+                />
+                <PerOTAStat label="Pending" value={stats.pending_reply} />
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -860,10 +956,10 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
       <div className="charts-grid">
         {isAllTab && (
           <div className="card">
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>Reviews by OTA</h3>
-            <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>Volume per booking channel</p>
+            <div className="section-title" style={{ marginBottom: 2 }}>Reviews by OTA</div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Volume per booking channel</p>
             {Object.keys(data.reviews_by_ota).length === 0 ? (
-              <p style={{ color: '#aaa', fontSize: 14 }}>No data yet</p>
+              <p style={{ color: 'var(--text-faint)', fontSize: 14 }}>No data yet</p>
             ) : (
               <VerticalBarChart data={data.reviews_by_ota} colors={otaColors} barWidth={52} />
             )}
@@ -871,69 +967,69 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
         )}
 
         <div className="card" style={isAllTab ? undefined : { gridColumn: '1 / -1' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>
+          <div className="section-title" style={{ marginBottom: 2 }}>
             Score Distribution{!isAllTab && ` — ${activeTab}`}
-          </h3>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>Reviews per score band (out of 10)</p>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Reviews per score band (out of 10)</p>
           {Object.values(view.score_distribution).every(v => v === 0) ? (
-            <p style={{ color: '#aaa', fontSize: 14 }}>No scored reviews yet</p>
+            <p style={{ color: 'var(--text-faint)', fontSize: 14 }}>No scored reviews yet</p>
           ) : (
             <VerticalBarChart data={view.score_distribution} color={tabAccent} barWidth={52} />
           )}
         </div>
 
         <div className="card" style={{ gridColumn: '1 / -1' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>
+          <div className="section-title" style={{ marginBottom: 2 }}>
             Monthly Review Volume{!isAllTab && ` — ${activeTab}`}
-          </h3>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>Number of reviews received — last 12 months</p>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>Number of reviews received — last 12 months</p>
           {Object.values(view.monthly_volume).every(v => v === 0) ? (
-            <p style={{ color: '#aaa', fontSize: 14 }}>No data yet</p>
+            <p style={{ color: 'var(--text-faint)', fontSize: 14 }}>No data yet</p>
           ) : (
             <VerticalBarChart data={view.monthly_volume} color={tabAccent} rotateLabels barWidth={36} />
           )}
         </div>
 
         <div className="card" style={{ gridColumn: '1 / -1' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>
+          <div className="section-title" style={{ marginBottom: 2 }}>
             Monthly Avg Score{!isAllTab && ` — ${activeTab}`}
-          </h3>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>Average guest score per month (out of 10) — last 12 months</p>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>Average guest score per month (out of 10) — last 12 months</p>
           {Object.values(view.monthly_avg).every(v => v === 0) ? (
-            <p style={{ color: '#aaa', fontSize: 14 }}>No scored reviews yet</p>
+            <p style={{ color: 'var(--text-faint)', fontSize: 14 }}>No scored reviews yet</p>
           ) : (
-            <VerticalBarChart data={view.monthly_avg} color="#22c55e" unit="/10" rotateLabels barWidth={36} />
+            <VerticalBarChart data={view.monthly_avg} color="var(--good)" unit="/10" rotateLabels barWidth={36} />
           )}
         </div>
 
         <div className="card" style={{ gridColumn: '1 / -1' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 3, color: '#111827' }}>
+          <div className="section-title" style={{ marginBottom: 2 }}>
             Reply Status{!isAllTab && ` — ${activeTab}`}
-          </h3>
-          <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 16 }}>How many reviews have received a response</p>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>How many reviews have received a response</p>
           <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontSize: 13, color: '#22c55e', fontWeight: 600 }}>Replied</span>
-                <span style={{ fontSize: 13, color: '#888' }}>{view.replied}</span>
+                <span style={{ fontSize: 13, color: 'var(--good)', fontWeight: 600 }}>Replied</span>
+                <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{view.replied}</span>
               </div>
               <div className="bar-track" style={{ height: 12 }}>
-                <div className="bar-fill" style={{ width: `${replyRate}%`, background: '#22c55e' }} />
+                <div className="bar-fill" style={{ width: `${replyRate}%`, background: 'var(--good)' }} />
               </div>
             </div>
             <div style={{
-              fontSize: 28, fontWeight: 800,
-              color: replyRate >= 80 ? '#22c55e' : replyRate >= 50 ? '#f59e0b' : '#ef4444',
+              fontSize: 28, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
+              color: replyRate >= 80 ? 'var(--good)' : replyRate >= 50 ? 'var(--warn)' : 'var(--bad)',
             }}>
               {replyRate}%
             </div>
           </div>
           <div style={{ marginTop: 12, display: 'flex', gap: 24 }}>
-            <div style={{ fontSize: 13, color: '#888' }}>
-              <span style={{ color: '#22c55e', fontWeight: 600 }}>●</span> {view.replied} replied
+            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              <span style={{ color: 'var(--good)', fontWeight: 600 }}>●</span> {view.replied} replied
             </div>
-            <div style={{ fontSize: 13, color: '#888' }}>
-              <span style={{ color: '#ef4444', fontWeight: 600 }}>●</span> {view.pending_reply} pending
+            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              <span style={{ color: 'var(--bad)', fontWeight: 600 }}>●</span> {view.pending_reply} pending
             </div>
           </div>
         </div>
@@ -949,7 +1045,7 @@ export default function Analytics() {
 
   return (
     <ThemedPage
-      eyebrow="📊 AI Analytics"
+      eyebrow="AI Analytics"
       title={selectedProperty ? selectedProperty.property_name : 'Analytics'}
       subtitle={selectedProperty
         ? `${selectedProperty.location || 'Across all OTAs'} — per-OTA scores, trends, and AI summaries`

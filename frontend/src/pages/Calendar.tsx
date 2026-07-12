@@ -55,12 +55,13 @@ const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
                      'July', 'August', 'September', 'October', 'November', 'December']
 
+// Semantic demand scale: high demand = positive (emerald), medium = amber, low/quiet = neutral.
 function demandColor(score: number): { bg: string; text: string } {
-  if (score >= 4) return { bg: '#fee2e2', text: '#991b1b' }
-  if (score >= 3) return { bg: '#ffedd5', text: '#9a3412' }
-  if (score >= 2) return { bg: '#fef9c3', text: '#854d0e' }
-  if (score >= 1) return { bg: '#ecfccb', text: '#365314' }
-  return { bg: '#f8f8f8', text: '#777' }
+  if (score >= 4) return { bg: 'rgba(5,150,105,0.18)', text: 'var(--good)' }
+  if (score >= 3) return { bg: 'var(--good-soft)', text: 'var(--good)' }
+  if (score >= 2) return { bg: 'var(--warn-soft)', text: 'var(--warn)' }
+  if (score >= 1) return { bg: 'var(--surface-2)', text: 'var(--text-muted)' }
+  return { bg: 'var(--surface-2)', text: 'var(--text-faint)' }
 }
 
 function demandLabel(score: number): string {
@@ -69,6 +70,13 @@ function demandLabel(score: number): string {
   if (score >= 2) return 'Moderate'
   if (score >= 1) return 'Low'
   return 'Quiet'
+}
+
+// Event impact pills follow the same semantic scale as demand.
+function impactChipClass(score: number): string {
+  if (score >= 3) return 'chip chip-good'
+  if (score >= 2) return 'chip chip-warn'
+  return 'chip'
 }
 
 function isoDate(d: Date): string {
@@ -270,11 +278,20 @@ export default function Calendar() {
 
   return (
     <ThemedPage
-      eyebrow="📅 Demand Calendar"
+      eyebrow="Demand Calendar"
       title={selectedProperty ? selectedProperty.property_name : 'Demand Calendar'}
       subtitle={selectedProperty
-        ? `${selectedProperty.property_name} — events, weather, and holidays driving demand`
+        ? 'Events, weather, and holidays driving local demand'
         : 'Connect a property to see the demand calendar'}
+      actions={selectedProperty ? (
+        <button
+          className="btn btn-secondary"
+          onClick={() => fetchMonth(viewYear, viewMonth, true)}
+          disabled={currentMonthLoading || !selectedProperty}
+        >
+          {currentMonthLoading ? 'Loading…' : 'Refresh this month'}
+        </button>
+      ) : undefined}
     >
 
       {/* Top controls */}
@@ -294,21 +311,14 @@ export default function Calendar() {
           ))}
         </select>
 
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() => fetchMonth(viewYear, viewMonth, true)}
-          disabled={currentMonthLoading || !selectedProperty}
-        >
-          {currentMonthLoading ? 'Loading…' : '↻ Force refresh this month'}
-        </button>
-
-        <span style={{ fontSize: 12, color: '#888', marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-faint)', marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           Demand:
-          {[0, 1, 2, 3, 4, 5].map(s => (
+          {[0, 1, 2, 3, 4].map(s => (
             <span key={s} style={{
-              padding: '2px 8px',
-              borderRadius: 10,
+              padding: '2px 9px',
+              borderRadius: 999,
               fontSize: 11,
+              fontWeight: 600,
               background: demandColor(s).bg,
               color: demandColor(s).text,
             }}>
@@ -322,182 +332,192 @@ export default function Calendar() {
 
       {!selectedProperty && (
         <div className="empty-state">
-          <div style={{ fontSize: 40 }}>📅</div>
+          <h3>No property selected</h3>
           <p>Add a property from the sidebar to start tracking demand drivers.</p>
         </div>
       )}
 
       {selectedProperty && (
         <>
-          {/* Month navigation header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={prevMonth}
-              disabled={!canGoBack}
-              title={canGoBack ? 'Previous month' : 'Cannot view past months'}
-            >
-              ← Prev month
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>
-                {MONTH_NAMES[viewMonth]} {viewYear}
-              </h2>
-              {currentMonthKey !== todayMonthKey && (
-                <button
-                  onClick={goToToday}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid #6c63ff',
-                    color: '#6c63ff',
-                    padding: '4px 10px',
-                    borderRadius: 4,
-                    cursor: 'pointer',
-                    fontSize: 12,
-                  }}
-                >
-                  Today
-                </button>
-              )}
-              {currentMonthLoading && (
-                <span style={{ fontSize: 12, color: '#888' }}>Loading…</span>
-              )}
-            </div>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={nextMonth}
-              disabled={!canGoForward}
-              title={canGoForward ? 'Next month' : 'Reached 12-month horizon'}
-            >
-              Next month →
-            </button>
-          </div>
-
           {currentMonthData && !currentMonthData.ticketmaster_configured && (
-            <div className="error-msg" style={{ background: '#fef9c3', border: '1px solid #fde047', color: '#713f12' }}>
+            <div style={{
+              background: 'var(--warn-soft)', border: '1px solid #f5e0b8', borderRadius: 10,
+              padding: '12px 16px', color: 'var(--warn)', fontSize: 14, marginBottom: 16,
+            }}>
               <strong>Events not connected.</strong> Set <code>TICKETMASTER_API_KEY</code> in your backend env (free key at{' '}
-              <a href="https://developer.ticketmaster.com/" target="_blank" rel="noopener noreferrer" style={{ color: '#713f12' }}>
+              <a href="https://developer.ticketmaster.com/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--warn)', fontWeight: 600 }}>
                 developer.ticketmaster.com
               </a>
               ). Weather and holidays still work without it.
             </div>
           )}
 
-          {/* Weekday headers */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 4 }}>
-            {WEEKDAY_LABELS.map(w => (
-              <div key={w} style={{ fontSize: 11, fontWeight: 600, color: '#888', textTransform: 'uppercase', textAlign: 'center', padding: '6px 0' }}>
-                {w}
+          {/* Month card: nav header + weekday header + day grid */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {/* Month navigation header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={prevMonth}
+                disabled={!canGoBack}
+                title={canGoBack ? 'Previous month' : 'Cannot view past months'}
+              >
+                ← Prev month
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--ink)' }}>
+                  {MONTH_NAMES[viewMonth]} {viewYear}
+                </h2>
+                {currentMonthKey !== todayMonthKey && (
+                  <button className="btn btn-ghost btn-sm" onClick={goToToday}>
+                    Today
+                  </button>
+                )}
+                {currentMonthLoading && (
+                  <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Loading…</span>
+                )}
               </div>
-            ))}
-          </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={nextMonth}
+                disabled={!canGoForward}
+                title={canGoForward ? 'Next month' : 'Reached 12-month horizon'}
+              >
+                Next month →
+              </button>
+            </div>
 
-          {/* Day cells */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, position: 'relative', minHeight: 200 }}>
-            {!currentMonthData && currentMonthLoading && (
-              <div style={{
-                position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'rgba(255,255,255,0.7)', borderRadius: 6, zIndex: 1,
-              }}>
-                <span style={{ color: '#666', fontSize: 14 }}>Loading {MONTH_NAMES[viewMonth]} {viewYear}…</span>
-              </div>
-            )}
-            {monthGrid.map(cell => {
-              const day = daysByDate.get(cell.iso)
-              const isPast = cell.iso < isoTodayStr
-              const isToday = cell.iso === isoTodayStr
-              const isExpanded = expandedDate === cell.iso
+            {/* Weekday headers */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+              {WEEKDAY_LABELS.map(w => (
+                <div key={w} style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.07em', textAlign: 'center', padding: '8px 0' }}>
+                  {w}
+                </div>
+              ))}
+            </div>
 
-              if (!cell.inMonth) {
-                return <div key={cell.iso + '-out'} style={{ minHeight: 110, padding: 8, color: '#ccc', fontSize: 12 }}>{cell.dayNum}</div>
-              }
+            {/* Day cells — white cells separated by 1px hairlines (grid gap over --border) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, background: 'var(--border)', position: 'relative', minHeight: 200 }}>
+              {!currentMonthData && currentMonthLoading && (
+                <div style={{
+                  position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'rgba(255,255,255,0.7)', zIndex: 1,
+                }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>Loading {MONTH_NAMES[viewMonth]} {viewYear}…</span>
+                </div>
+              )}
+              {monthGrid.map(cell => {
+                const day = daysByDate.get(cell.iso)
+                const isPast = cell.iso < isoTodayStr
+                const isToday = cell.iso === isoTodayStr
+                const isExpanded = expandedDate === cell.iso
 
-              if (!day) {
-                return (
-                  <div key={cell.iso} style={{
-                    minHeight: 110,
-                    padding: 8,
-                    background: isPast ? '#fafafa' : '#fff',
-                    border: `1px solid ${isToday ? '#6c63ff' : '#eee'}`,
-                    borderRadius: 6,
-                    color: '#bbb',
-                    fontSize: 12,
-                  }}>
-                    <div style={{ fontWeight: 600 }}>{cell.dayNum}</div>
-                    <div style={{ fontSize: 10, marginTop: 4 }}>
-                      {isPast ? '(past)' : currentMonthLoading ? '…' : ''}
+                if (!cell.inMonth) {
+                  return (
+                    <div key={cell.iso + '-out'} style={{ minHeight: 110, padding: 8, background: 'var(--surface)', color: 'var(--border-strong)', fontSize: 12 }}>
+                      {cell.dayNum}
                     </div>
+                  )
+                }
+
+                if (!day) {
+                  return (
+                    <div key={cell.iso} style={{
+                      minHeight: 110,
+                      padding: 8,
+                      background: isPast ? 'var(--surface-2)' : 'var(--surface)',
+                      boxShadow: isToday ? 'inset 0 0 0 2px var(--accent)' : 'none',
+                      color: 'var(--text-faint)',
+                      fontSize: 12,
+                    }}>
+                      <div style={{ fontWeight: 600 }}>{cell.dayNum}</div>
+                      <div style={{ fontSize: 10, marginTop: 4 }}>
+                        {isPast ? '(past)' : currentMonthLoading ? '…' : ''}
+                      </div>
+                    </div>
+                  )
+                }
+
+                const c = demandColor(day.demand_score)
+                return (
+                  <div
+                    key={cell.iso}
+                    onClick={() => setExpandedDate(isExpanded ? null : cell.iso)}
+                    style={{
+                      minHeight: 110,
+                      padding: 8,
+                      paddingBottom: 28,
+                      background: 'var(--surface)',
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      transition: 'box-shadow 0.1s',
+                      position: 'relative',
+                      boxShadow: isExpanded
+                        ? 'inset 0 0 0 2px var(--accent), var(--shadow-md)'
+                        : isToday ? 'inset 0 0 0 2px var(--accent)' : 'none',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--ink)' }}>{cell.dayNum}</span>
+                      {day.is_weekend && (
+                        <span style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.04em' }}>WKND</span>
+                      )}
+                    </div>
+
+                    {day.holiday && (
+                      <div style={{ marginTop: 4 }} title={day.holiday}>
+                        <span style={{
+                          display: 'inline-block', padding: '1px 7px', borderRadius: 999,
+                          background: 'var(--accent-soft)', color: 'var(--accent)',
+                          fontSize: 10, fontWeight: 600, lineHeight: 1.5,
+                          maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {day.holiday.length > 18 ? day.holiday.slice(0, 18) + '…' : day.holiday}
+                        </span>
+                      </div>
+                    )}
+
+                    {day.weather_temp_high !== null && (
+                      <div style={{ color: 'var(--text-muted)', marginTop: 3 }}>
+                        {day.weather_emoji} {Math.round(day.weather_temp_high)}°
+                      </div>
+                    )}
+
+                    {day.event_count > 0 && (() => {
+                      const topImpact = day.events.reduce((max, e) => Math.max(max, e.impact_score), 0)
+                      return (
+                        <div style={{ marginTop: 4, color: 'var(--text)', fontWeight: 600 }}>
+                          🎟️ {day.event_count} event{day.event_count > 1 ? 's' : ''}
+                          {topImpact >= 2 && (
+                            <span title="Highest event impact on this day">
+                              {' '}{topImpact === 3 ? '🎯' : '✈️'}
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })()}
+
+                    <span style={{
+                      position: 'absolute',
+                      bottom: 6,
+                      left: 8,
+                      display: 'inline-flex',
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 9,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      background: c.bg,
+                      color: c.text,
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {demandLabel(day.demand_score)}
+                    </span>
                   </div>
                 )
-              }
-
-              const c = demandColor(day.demand_score)
-              return (
-                <div
-                  key={cell.iso}
-                  onClick={() => setExpandedDate(isExpanded ? null : cell.iso)}
-                  style={{
-                    minHeight: 110,
-                    padding: 8,
-                    background: c.bg,
-                    border: `1px solid ${isToday ? '#6c63ff' : 'rgba(0,0,0,0.06)'}`,
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    fontSize: 11,
-                    transition: 'transform 0.1s',
-                    position: 'relative',
-                    boxShadow: isExpanded ? '0 4px 12px rgba(108,99,255,0.25)' : 'none',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                    <span style={{ fontWeight: 700, fontSize: 14, color: '#222' }}>{cell.dayNum}</span>
-                    {day.is_weekend && (
-                      <span style={{ fontSize: 9, color: '#6c63ff', fontWeight: 700 }}>WKND</span>
-                    )}
-                  </div>
-
-                  {day.holiday && (
-                    <div style={{ color: '#6b21a8', fontWeight: 500, marginTop: 2, lineHeight: 1.2 }} title={day.holiday}>
-                      🎌 {day.holiday.length > 18 ? day.holiday.slice(0, 18) + '…' : day.holiday}
-                    </div>
-                  )}
-
-                  {day.weather_temp_high !== null && (
-                    <div style={{ color: '#444', marginTop: 2 }}>
-                      {day.weather_emoji} {Math.round(day.weather_temp_high)}°
-                    </div>
-                  )}
-
-                  {day.event_count > 0 && (() => {
-                    const topImpact = day.events.reduce((max, e) => Math.max(max, e.impact_score), 0)
-                    return (
-                      <div style={{ marginTop: 4, color: c.text, fontWeight: 600 }}>
-                        🎟️ {day.event_count} event{day.event_count > 1 ? 's' : ''}
-                        {topImpact >= 2 && (
-                          <span title="Highest event impact on this day">
-                            {' '}{topImpact === 3 ? '🎯' : '✈️'}
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })()}
-
-                  <div style={{
-                    position: 'absolute',
-                    bottom: 4,
-                    left: 8,
-                    right: 8,
-                    fontSize: 9,
-                    color: c.text,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    fontWeight: 700,
-                  }}>
-                    {demandLabel(day.demand_score)}
-                  </div>
-                </div>
-              )
-            })}
+              })}
+            </div>
           </div>
 
           {/* Expanded day details */}
@@ -505,17 +525,17 @@ export default function Calendar() {
             const d = daysByDate.get(expandedDate)!
             const dDate = new Date(expandedDate + 'T00:00:00')
             return (
-              <div style={{ marginTop: 16, padding: 16, background: '#fafafa', borderRadius: 8, border: '1px solid #eee' }}>
+              <div className="card" style={{ marginTop: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: 18 }}>
+                    <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--ink)' }}>
                       {dDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                     </h3>
-                    <div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
                       <span style={{ color: demandColor(d.demand_score).text, fontWeight: 600 }}>
                         {demandLabel(d.demand_score)} demand
                       </span>
-                      {d.holiday && <span> · 🎌 {d.holiday}</span>}
+                      {d.holiday && <span> · {d.holiday}</span>}
                       {d.weather_temp_high !== null && (
                         <span> · {d.weather_emoji} {Math.round(d.weather_temp_high)}°/{Math.round(d.weather_temp_low ?? 0)}°F · {d.weather_summary}</span>
                       )}
@@ -531,69 +551,52 @@ export default function Calendar() {
 
                 {d.event_count > 0 ? (
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#888', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    <div className="section-title" style={{ marginBottom: 8 }}>
                       {d.event_count} event{d.event_count > 1 ? 's' : ''} within {currentMonthData.radius_miles} mi
-                      <span style={{ marginLeft: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 'normal' }}>
+                      <span style={{ marginLeft: 6, fontWeight: 400, textTransform: 'none', letterSpacing: 'normal', color: 'var(--text-muted)' }}>
                         — sorted by likely hotel impact
                       </span>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
                       {[...d.events]
                         .sort((a, b) => b.impact_score - a.impact_score)
-                        .map((e, i) => {
-                          const impactBg = e.impact_score >= 3 ? '#fee2e2'
-                            : e.impact_score >= 2 ? '#ffedd5'
-                            : e.impact_score >= 1 ? '#fef9c3'
-                            : '#f1f5f9'
-                          const impactText = e.impact_score >= 3 ? '#991b1b'
-                            : e.impact_score >= 2 ? '#9a3412'
-                            : e.impact_score >= 1 ? '#854d0e'
-                            : '#475569'
-                          return (
-                            <div key={i} style={{ background: '#fff', padding: 10, borderRadius: 6, border: '1px solid #eee' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
-                                <div style={{ flex: 1 }}>
-                                  {e.classification && (
-                                    <div style={{ fontSize: 10, color: '#6c63ff', fontWeight: 600, textTransform: 'uppercase' }}>
-                                      {e.classification}
-                                    </div>
-                                  )}
-                                  <div style={{ fontSize: 13, fontWeight: 500, marginTop: 2 }}>{e.name}</div>
-                                </div>
-                                {e.impact_label && (
-                                  <span
-                                    title={`Estimated hotel-demand impact: ${e.impact_label}`}
-                                    style={{
-                                      fontSize: 10,
-                                      fontWeight: 600,
-                                      background: impactBg,
-                                      color: impactText,
-                                      padding: '2px 6px',
-                                      borderRadius: 10,
-                                      whiteSpace: 'nowrap',
-                                    }}
-                                  >
-                                    {e.impact_emoji} {e.impact_label}
-                                  </span>
+                        .map((e, i) => (
+                          <div key={i} style={{ background: 'var(--surface)', padding: 12, borderRadius: 10, border: '1px solid var(--border)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
+                              <div style={{ flex: 1 }}>
+                                {e.classification && (
+                                  <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                                    {e.classification}
+                                  </div>
                                 )}
+                                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>{e.name}</div>
                               </div>
-                              <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
-                                {e.venue}
-                                {e.venue_distance_miles !== null && ` · ${e.venue_distance_miles.toFixed(1)} mi`}
-                                {e.start_time && ` · ${e.start_time.slice(0, 5)}`}
-                              </div>
-                              {e.url && (
-                                <a href={e.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#6c63ff' }}>
-                                  View on Ticketmaster ↗
-                                </a>
+                              {e.impact_label && (
+                                <span
+                                  className={impactChipClass(e.impact_score)}
+                                  title={`Estimated hotel-demand impact: ${e.impact_label}`}
+                                  style={{ fontSize: 11, whiteSpace: 'nowrap', flexShrink: 0 }}
+                                >
+                                  {e.impact_emoji} {e.impact_label}
+                                </span>
                               )}
                             </div>
-                          )
-                        })}
+                            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                              {e.venue}
+                              {e.venue_distance_miles !== null && ` · ${e.venue_distance_miles.toFixed(1)} mi`}
+                              {e.start_time && ` · ${e.start_time.slice(0, 5)}`}
+                            </div>
+                            {e.url && (
+                              <a href={e.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>
+                                View on Ticketmaster ↗
+                              </a>
+                            )}
+                          </div>
+                        ))}
                     </div>
                   </div>
                 ) : (
-                  <div style={{ color: '#888', fontSize: 13 }}>
+                  <div style={{ color: 'var(--text-faint)', fontSize: 13 }}>
                     {currentMonthData.ticketmaster_configured ? 'No events listed for this day.' : 'Connect Ticketmaster to see events.'}
                   </div>
                 )}
@@ -602,9 +605,9 @@ export default function Calendar() {
           })()}
 
           {currentMonthData && (
-            <p style={{ fontSize: 12, color: '#888', marginTop: 16, lineHeight: 1.5 }}>
+            <p style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 16, lineHeight: 1.5 }}>
               {MONTH_NAMES[viewMonth]} {viewYear} loaded <strong>{new Date(currentMonthData.fetched_at).toLocaleString()}</strong>
-              {currentMonthData.cached && <span style={{ marginLeft: 6, color: '#6c63ff' }}>· from cache</span>}
+              {currentMonthData.cached && <span style={{ marginLeft: 6, color: 'var(--accent)' }}>· from cache</span>}
               <span> · </span>
               Months load on demand as you navigate. Events from Ticketmaster within {currentMonthData.radius_miles} mi · weather forecast covers
               ~16 days from today (Open-Meteo) · holidays detected for the property's country.

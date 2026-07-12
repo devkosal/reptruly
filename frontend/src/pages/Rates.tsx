@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useProperty } from '../context/PropertyContext'
 import SyncFooter from '../components/SyncFooter'
 import ThemedPage from '../components/ThemedPage'
+import UpgradeNotice, { isUpgradeBlocked } from '../components/UpgradeNotice'
 
 interface CompetitorRate {
   hotel_id: string
@@ -176,12 +177,9 @@ function MultiSelectDropdown<T extends string>({ label, options, selected, onCha
     <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
       <button
         onClick={() => setOpen(o => !o)}
+        className="filter-select"
         style={{
-          padding: '6px 12px',
-          minWidth: 140,
-          borderRadius: 6,
-          border: '1px solid #ddd',
-          background: '#fff',
+          minWidth: 150,
           cursor: 'pointer',
           fontSize: 13,
           textAlign: 'left',
@@ -192,10 +190,10 @@ function MultiSelectDropdown<T extends string>({ label, options, selected, onCha
         }}
       >
         <span>
-          <span style={{ color: '#666' }}>{label}: </span>
-          <strong style={{ color: '#222' }}>{summary}</strong>
+          <span style={{ color: 'var(--text-muted)' }}>{label}: </span>
+          <strong style={{ color: 'var(--text)' }}>{summary}</strong>
         </span>
-        <span style={{ color: '#888', fontSize: 10 }}>▼</span>
+        <span style={{ color: 'var(--text-faint)', fontSize: 10 }}>▼</span>
       </button>
 
       {open && (
@@ -206,24 +204,24 @@ function MultiSelectDropdown<T extends string>({ label, options, selected, onCha
             left: 0,
             marginTop: 4,
             minWidth: 200,
-            background: '#fff',
-            border: '1px solid #ddd',
-            borderRadius: 6,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 10,
+            boxShadow: 'var(--shadow-md)',
             zIndex: 10,
             padding: 6,
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 8px 6px', borderBottom: '1px solid #f0f0f0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 8px 6px', borderBottom: '1px solid var(--border)' }}>
             <button
               onClick={() => onChange(new Set(options.map(o => o.value)))}
-              style={{ background: 'transparent', border: 'none', color: '#6c63ff', cursor: 'pointer', fontSize: 12, padding: 0 }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', padding: 0 }}
             >
               Select all
             </button>
             <button
               onClick={() => onChange(new Set())}
-              style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: 12, padding: 0 }}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', padding: 0 }}
             >
               Clear
             </button>
@@ -238,16 +236,16 @@ function MultiSelectDropdown<T extends string>({ label, options, selected, onCha
                 padding: '6px 8px',
                 cursor: 'pointer',
                 fontSize: 13,
-                borderRadius: 4,
+                borderRadius: 6,
               }}
-              onMouseEnter={e => (e.currentTarget.style.background = '#f5f3ff')}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <input
                 type="checkbox"
                 checked={selected.has(opt.value)}
                 onChange={() => toggle(opt.value)}
-                style={{ cursor: 'pointer' }}
+                style={{ cursor: 'pointer', accentColor: 'var(--accent)' }}
               />
               {opt.label}
             </label>
@@ -271,6 +269,7 @@ export default function Rates() {
   const [data, setData] = useState<RatesResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [upgradeMsg, setUpgradeMsg] = useState('')
 
   // null = "not yet defaulted for this dataset"; once data lands we seed defaults.
   const [starFilter, setStarFilter] = useState<Set<StarBucket> | null>(null)
@@ -330,12 +329,17 @@ export default function Rates() {
     }
     setLoading(true)
     setError('')
+    setUpgradeMsg('')
     setData(null)
     try {
       const params = new URLSearchParams({ checkin, checkout, adults: String(adults) })
       if (forceRefresh) params.set('force_refresh', 'true')
       const res = await fetch(`/api/rates/${selectedProperty.id}?${params}`, { credentials: 'include' })
       const json = await res.json()
+      if (isUpgradeBlocked(res.status)) {
+        setUpgradeMsg(json.detail || json.message || 'Rate shopping is a Pro feature.')
+        return
+      }
       if (!res.ok) throw new Error(json.message || json.detail || 'Failed to load rates')
       setData(json)
     } catch (e: any) {
@@ -378,24 +382,30 @@ export default function Rates() {
       ? ((userPriceFromComps - filteredAvg) / filteredAvg) * 100
       : null
 
+  // Semantic tint only: cheaper than market = good, pricier = bad, on par = accent.
   const positionVerdict = (() => {
     if (filteredVsAvgPct === null) return null
     const pct = filteredVsAvgPct
-    if (pct < -10) return { label: 'Below market', color: '#16a34a' }
-    if (pct > 10) return { label: 'Above market', color: '#dc2626' }
-    return { label: 'On par with market', color: '#6c63ff' }
+    if (pct < -10) return { label: 'Below market', color: 'var(--good)', chip: 'chip-good' }
+    if (pct > 10) return { label: 'Above market', color: 'var(--bad)', chip: 'chip-bad' }
+    return { label: 'On par with market', color: 'var(--accent)', chip: 'chip-accent' }
   })()
 
   return (
     <ThemedPage
-      eyebrow="💰 Live Rate Shopping"
+      eyebrow="Rate shopping"
       title={selectedProperty ? selectedProperty.property_name : 'Rates'}
       subtitle={selectedProperty
-        ? `${selectedProperty.property_name} vs nearby competitors on Booking.com`
+        ? 'Your nightly rate vs. nearby competitors on Booking.com'
         : 'Connect a property to see rates'}
+      actions={
+        <button className="btn btn-primary" onClick={() => fetchRates(true)} disabled={loading || !selectedProperty}>
+          {loading ? 'Loading…' : '↻ Force refresh'}
+        </button>
+      }
     >
 
-      {/* Top controls: property + dates + adults */}
+      {/* One filters row: property + stay controls, plus comp-set filters once data lands */}
       <div className="filters">
         <select
           className="filter-select"
@@ -412,7 +422,7 @@ export default function Rates() {
           ))}
         </select>
 
-        <label style={{ fontSize: 13, color: '#666', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
           Check-in
           <input
             className="filter-input"
@@ -428,7 +438,7 @@ export default function Rates() {
           />
         </label>
 
-        <label style={{ fontSize: 13, color: '#666', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
           Check-out
           <input
             className="filter-input"
@@ -439,7 +449,7 @@ export default function Rates() {
           />
         </label>
 
-        <label style={{ fontSize: 13, color: '#666', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
           Adults
           <input
             className="filter-input"
@@ -452,53 +462,8 @@ export default function Rates() {
           />
         </label>
 
-        <button className="btn btn-secondary btn-sm" onClick={() => fetchRates(true)} disabled={loading || !selectedProperty}>
-          {loading ? 'Loading…' : '↻ Force refresh'}
-        </button>
-      </div>
-
-      {error && <div className="error-msg">{error}</div>}
-
-      {!selectedProperty && (
-        <div className="empty-state">
-          <div style={{ fontSize: 40 }}>💰</div>
-          <p>Add a property from the sidebar to start tracking rates.</p>
-        </div>
-      )}
-
-      {selectedProperty && loading && !data && (
-        <div className="loading">Fetching rates from Booking.com…</div>
-      )}
-
-      {data && (
-        <>
-          {/* Headline cards */}
-          <div className="stats-grid" style={{ marginBottom: 24 }}>
-            <div className="stat-card">
-              <div className="stat-label">Your rate ({data.nights} night{data.nights > 1 ? 's' : ''})</div>
-              <div className="stat-value">{formatPrice(data.user_rate, data.currency)}</div>
-              {data.user_room_name && (
-                <div className="stat-sub" title={data.user_room_name}>
-                  {data.user_room_name.length > 50 ? data.user_room_name.slice(0, 50) + '…' : data.user_room_name}
-                </div>
-              )}
-            </div>
-
-            <div className="stat-card">
-              <div className="stat-label">Vs. market average</div>
-              <div className="stat-value" style={{ color: positionVerdict?.color }}>
-                {filteredVsAvgPct === null
-                  ? '—'
-                  : `${filteredVsAvgPct > 0 ? '+' : ''}${filteredVsAvgPct.toFixed(1)}%`}
-              </div>
-              <div className="stat-sub" style={{ color: positionVerdict?.color }}>
-                {positionVerdict?.label || 'No competitor data'}
-              </div>
-            </div>
-          </div>
-
-          {/* Column filters */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        {data && (
+          <>
             <MultiSelectDropdown<DistanceBucket>
               label="Distance"
               options={DISTANCE_OPTIONS}
@@ -524,23 +489,68 @@ export default function Rates() {
               onChange={setRateFilter}
             />
             <button
+              className="btn btn-ghost btn-sm"
               onClick={() => {
                 setStarFilter(new Set(STAR_OPTIONS.map(o => o.value)))
                 setDistanceFilter(new Set(DISTANCE_OPTIONS.map(o => o.value)))
                 setReviewFilter(new Set(REVIEW_OPTIONS.map(o => o.value)))
                 setRateFilter(new Set(RATE_OPTIONS.map(o => o.value)))
               }}
-              style={{
-                marginLeft: 'auto',
-                background: 'transparent',
-                border: 'none',
-                color: '#6c63ff',
-                cursor: 'pointer',
-                fontSize: 13,
-              }}
+              style={{ marginLeft: 'auto' }}
             >
               Reset filters
             </button>
+          </>
+        )}
+      </div>
+
+      {upgradeMsg && <div style={{ marginBottom: 14 }}><UpgradeNotice message={upgradeMsg} /></div>}
+      {error && <div className="error-msg">{error}</div>}
+
+      {!selectedProperty && (
+        <div className="empty-state">
+          <h3>No property selected</h3>
+          <p>Add a property from the sidebar to start tracking rates.</p>
+        </div>
+      )}
+
+      {selectedProperty && loading && !data && (
+        <div className="loading">Fetching rates from Booking.com…</div>
+      )}
+
+      {data && (
+        <>
+          {/* Headline cards */}
+          <div className="stats-grid">
+            <div className="stat-card">
+              <div className="stat-label">Your rate ({data.nights} night{data.nights > 1 ? 's' : ''})</div>
+              <div className="stat-value">{formatPrice(data.user_rate, data.currency)}</div>
+              {data.user_room_name && (
+                <div className="stat-sub" title={data.user_room_name}>
+                  {data.user_room_name.length > 50 ? data.user_room_name.slice(0, 50) + '…' : data.user_room_name}
+                </div>
+              )}
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Vs. market average</div>
+              <div className="stat-value" style={{ color: positionVerdict?.color }}>
+                {filteredVsAvgPct === null
+                  ? '—'
+                  : `${filteredVsAvgPct > 0 ? '+' : ''}${filteredVsAvgPct.toFixed(1)}%`}
+              </div>
+              <div className="stat-sub" style={{ marginTop: 6 }}>
+                {positionVerdict
+                  ? <span className={`chip ${positionVerdict.chip}`}>{positionVerdict.label}</span>
+                  : 'No competitor data'}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Competitors compared</div>
+              <div className="stat-value">{compPrices.length}</div>
+              <div className="stat-sub">with live rates for these dates</div>
+            </div>
           </div>
 
           {/* Comp set table */}
@@ -561,7 +571,7 @@ export default function Rates() {
                   <tr
                     key={c.hotel_id}
                     style={{
-                      background: c.is_user_property ? '#f5f3ff' : undefined,
+                      background: c.is_user_property ? 'var(--accent-soft)' : undefined,
                       fontWeight: c.is_user_property ? 600 : undefined,
                     }}
                   >
@@ -569,12 +579,12 @@ export default function Rates() {
                     <td>
                       {c.hotel_name}
                       {c.is_user_property && (
-                        <span style={{ marginLeft: 8, fontSize: 11, color: '#6c63ff', fontWeight: 600 }}>
-                          YOU
+                        <span className="chip chip-accent" style={{ marginLeft: 8 }}>
+                          You
                         </span>
                       )}
                     </td>
-                    <td style={{ color: '#666' }}>
+                    <td style={{ color: 'var(--text-muted)' }}>
                       {c.distance_km !== null ? `${(c.distance_km * KM_TO_MI).toFixed(1)} mi` : '—'}
                     </td>
                     <td>{c.star_rating !== null ? `${c.star_rating.toFixed(0)}★` : '—'}</td>
@@ -586,7 +596,7 @@ export default function Rates() {
                 ))}
                 {sortedCompetitors.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: 24, color: '#888' }}>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
                       {data.competitors.some(c => c.price !== null)
                         ? 'No competitors match the current filters.'
                         : 'No rates available for these dates.'}
@@ -597,9 +607,9 @@ export default function Rates() {
             </table>
           </div>
 
-          <p style={{ fontSize: 12, color: '#888', marginTop: 12, lineHeight: 1.5 }}>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12, lineHeight: 1.5 }}>
             Last updated <strong>{new Date(data.fetched_at).toLocaleString()}</strong>
-            {data.cached && <span style={{ marginLeft: 6, color: '#6c63ff' }}>· from cache</span>}
+            {data.cached && <span style={{ marginLeft: 6, color: 'var(--accent)', fontWeight: 600 }}>· from cache</span>}
             <span> · </span>
             Rates refresh once per day; click <em>Force refresh</em> to pull live now. Showing the cheapest room
             at each hotel for {adults} adult{adults > 1 ? 's' : ''}, 1 room.

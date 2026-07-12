@@ -2,6 +2,13 @@ import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   SyncDomain, SyncStatusRow, fetchAllSyncStatus, formatRelative, triggerSync,
 } from '../api/sync'
+import {
+  BillingStatus, confirmCheckout, fetchBillingStatus, formatPrice,
+  openBillingPortal, startCheckout,
+} from '../api/billing'
+import {
+  fetchNotificationSettings, updateNotificationSettings,
+} from '../api/notifications'
 import ThemedPage from '../components/ThemedPage'
 import { useAuth } from '../context/AuthContext'
 
@@ -145,28 +152,16 @@ function saveSettings(s: SettingsState) {
 
 // ---------- Reusable bits ----------
 
-function Section({ title, icon, description, children }: {
-  title: string; icon: string; description?: string; children: ReactNode
+function Section({ title, description, children }: {
+  title: string; description?: string; children: ReactNode
 }) {
   return (
-    <div style={{
-      background: '#fff', border: '1px solid #f3e8ff', borderRadius: 16, padding: 22,
-      boxShadow: '0 1px 3px rgba(168,85,247,0.06)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
-        <span style={{
-          width: 34, height: 34, borderRadius: 10, background: '#faf5ff',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 17, flexShrink: 0,
-        }}>{icon}</span>
-        <div>
-          <h3 style={{ fontSize: 15, fontWeight: 800, color: '#1a1a2e', letterSpacing: '-0.01em' }}>
-            {title}
-          </h3>
-          {description && (
-            <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{description}</p>
-          )}
-        </div>
+    <div className="card">
+      <div style={{ marginBottom: 14 }}>
+        <div className="section-title" style={{ marginBottom: description ? 4 : 0 }}>{title}</div>
+        {description && (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>{description}</p>
+        )}
       </div>
       {children}
     </div>
@@ -180,20 +175,20 @@ function ToggleRow({ label, description, checked, onChange, badge }: {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '12px 0', borderBottom: '1px solid #f5f3ff', gap: 16,
+      padding: '12px 0', borderBottom: '1px solid var(--border)', gap: 16,
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>{label}</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{label}</span>
           {badge && (
-            <span style={{
-              fontSize: 9, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase',
-              padding: '2px 7px', borderRadius: 999, background: '#fef3c7', color: '#92400e',
-            }}>{badge}</span>
+            <span
+              className={badge === 'Pro' ? 'chip chip-accent' : 'chip chip-good'}
+              style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', padding: '2px 8px' }}
+            >{badge}</span>
           )}
         </div>
         {description && (
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3, lineHeight: 1.5 }}>{description}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>{description}</div>
         )}
       </div>
       <button
@@ -202,7 +197,7 @@ function ToggleRow({ label, description, checked, onChange, badge }: {
         aria-pressed={checked}
         style={{
           width: 44, height: 24, borderRadius: 999,
-          background: checked ? 'linear-gradient(135deg, #a855f7 0%, #ec4899 100%)' : '#e5e7eb',
+          background: checked ? 'var(--accent)' : 'var(--border-strong)',
           border: 'none', cursor: 'pointer', position: 'relative', flexShrink: 0,
           padding: 0, transition: 'background 0.18s',
         }}
@@ -210,7 +205,7 @@ function ToggleRow({ label, description, checked, onChange, badge }: {
         <span style={{
           position: 'absolute', top: 2, left: checked ? 22 : 2,
           width: 20, height: 20, borderRadius: '50%', background: '#fff',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+          boxShadow: '0 1px 3px rgba(16,24,40,0.25)',
           transition: 'left 0.18s',
         }} />
       </button>
@@ -225,24 +220,24 @@ function SelectRow({ label, description, value, onChange, options }: {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '12px 0', borderBottom: '1px solid #f5f3ff', gap: 16,
+      padding: '12px 0', borderBottom: '1px solid var(--border)', gap: 16,
     }}>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>{label}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
         {description && (
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>{description}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{description}</div>
         )}
       </div>
       <select
+        className="filter-select"
         value={value}
         onChange={e => onChange(e.target.value)}
         style={{
-          width: 220, padding: '8px 32px 8px 12px', fontSize: 13, borderRadius: 8,
-          border: '1px solid #e9d5ff', background: '#fff', color: '#1a1a2e',
-          outline: 'none', fontFamily: 'inherit', cursor: 'pointer',
+          width: 220, fontSize: 13, cursor: 'pointer',
           appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
-          backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%237c3aed' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>\")",
+          backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' stroke='%235b6472' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>\")",
           backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
+          paddingRight: 32,
         }}
       >
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -265,17 +260,13 @@ function ChipGroup<T extends string>({ value, options, onChange }: {
             onClick={() => onChange(o.value)}
             style={{
               padding: '7px 13px', borderRadius: 999, fontSize: 12, fontWeight: 700,
-              cursor: 'pointer', letterSpacing: '0.02em',
-              border: active ? '1px solid transparent' : '1px solid #e9d5ff',
-              background: active
-                ? 'linear-gradient(135deg, #a855f7 0%, #ec4899 100%)'
-                : '#fff',
-              color: active ? '#fff' : '#6b21a8',
-              boxShadow: active ? '0 4px 10px rgba(168,85,247,0.3)' : 'none',
+              cursor: 'pointer', letterSpacing: '0.02em', fontFamily: 'inherit',
+              border: active ? '1px solid var(--accent)' : '1px solid var(--border-strong)',
+              background: active ? 'var(--accent)' : 'var(--surface)',
+              color: active ? '#fff' : 'var(--text-muted)',
               transition: 'all 0.15s',
             }}
           >
-            {o.emoji && <span style={{ marginRight: 5 }}>{o.emoji}</span>}
             {o.label}
           </button>
         )
@@ -291,6 +282,7 @@ export default function Settings() {
   const [settings, setSettings] = useState<SettingsState>(loadSettings)
   const [savedFlash, setSavedFlash] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [notifLoaded, setNotifLoaded] = useState(false)
 
   // Auto-save on any change, with a tiny "Saved" flash.
   useEffect(() => {
@@ -299,6 +291,25 @@ export default function Settings() {
     const t = setTimeout(() => setSavedFlash(false), 1100)
     return () => clearTimeout(t)
   }, [settings])
+
+  // Notification prefs live server-side (they drive real emails) — load them
+  // on mount, then persist changes back. Other sections stay local-only.
+  useEffect(() => {
+    fetchNotificationSettings()
+      .then(data => {
+        if (data) setSettings(s => ({ ...s, notifications: { ...s.notifications, ...data } }))
+      })
+      .catch(() => {})
+      .finally(() => setNotifLoaded(true))
+  }, [])
+
+  useEffect(() => {
+    if (!notifLoaded) return
+    const t = setTimeout(() => {
+      updateNotificationSettings(settings.notifications).catch(() => {})
+    }, 400)
+    return () => clearTimeout(t)
+  }, [settings.notifications, notifLoaded])
 
   const browserTz = useMemo(() => {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return '' }
@@ -320,16 +331,16 @@ export default function Settings() {
 
   return (
     <ThemedPage
-      eyebrow="⚙️ Settings"
+      eyebrow="Workspace"
       title="Settings"
       subtitle="Tune your workspace, alerts, and reply assistant."
     >
       {/* Save flash */}
       <div style={{
         position: 'fixed', top: 24, right: 24,
-        background: '#10b981', color: '#fff', padding: '8px 14px', borderRadius: 999,
+        background: 'var(--good)', color: '#fff', padding: '8px 14px', borderRadius: 999,
         fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
-        boxShadow: '0 6px 16px rgba(16,185,129,0.3)',
+        boxShadow: '0 6px 16px rgba(5,150,105,0.3)',
         opacity: savedFlash ? 1 : 0,
         transform: savedFlash ? 'translateY(0)' : 'translateY(-8px)',
         transition: 'opacity 0.2s, transform 0.2s',
@@ -338,12 +349,13 @@ export default function Settings() {
         ✓ Saved
       </div>
 
-      <div style={{ display: 'grid', gap: 18, maxWidth: 820 }}>
+      <div style={{ display: 'grid', gap: 16, maxWidth: 820 }}>
+
+        <BillingSection />
 
         {/* Notifications */}
         <Section
           title="Notifications"
-          icon="🔔"
           description="Choose what we ping you about. You can change these anytime."
         >
           <NotificationEmail
@@ -399,35 +411,34 @@ export default function Settings() {
         {/* Review Reply Assistant */}
         <Section
           title="AI Reply Assistant"
-          icon="✨"
           description="How we draft and suggest replies to guest reviews."
         >
-          <div style={{ padding: '12px 0', borderBottom: '1px solid #f5f3ff' }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>
+          <div style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
               Reply tone
             </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
               Sets the personality of suggested replies.
             </div>
             <ChipGroup
               value={settings.reply.tone}
               onChange={(t) => patch('reply', { tone: t })}
               options={[
-                { value: 'professional', label: 'Professional', emoji: '🤝' },
-                { value: 'warm', label: 'Warm', emoji: '💛' },
-                { value: 'concise', label: 'Concise', emoji: '⚡' },
-                { value: 'playful', label: 'Playful', emoji: '✨' },
+                { value: 'professional', label: 'Professional' },
+                { value: 'warm', label: 'Warm' },
+                { value: 'concise', label: 'Concise' },
+                { value: 'playful', label: 'Playful' },
               ]}
             />
             <div style={{
-              marginTop: 14, padding: '14px 16px', borderRadius: 12,
-              background: 'linear-gradient(135deg, #fdf4ff 0%, #f5f3ff 100%)',
-              border: '1px solid #f3e8ff', fontSize: 13, color: '#4c1d95', lineHeight: 1.55,
+              marginTop: 14, padding: '14px 16px', borderRadius: 10,
+              background: 'var(--surface-2)',
+              border: '1px solid var(--border)', fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55,
               fontStyle: 'italic',
             }}>
               <div style={{
                 fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
-                color: '#7c3aed', marginBottom: 6, fontStyle: 'normal',
+                color: 'var(--accent)', marginBottom: 6, fontStyle: 'normal',
               }}>Preview</div>
               "{TONE_SAMPLES[settings.reply.tone]}"
             </div>
@@ -457,10 +468,10 @@ export default function Settings() {
           />
 
           <div style={{ padding: '14px 0 4px' }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e', marginBottom: 6 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
               Reply signature
             </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
               Appended to the bottom of every reply.
             </div>
             <textarea
@@ -468,11 +479,8 @@ export default function Settings() {
               onChange={e => patch('reply', { signature: e.target.value })}
               placeholder="— The team at [Hotel Name]"
               rows={2}
-              style={{
-                width: '100%', padding: '10px 12px', fontSize: 13, borderRadius: 8,
-                border: '1px solid #e9d5ff', background: '#fff', color: '#1a1a2e',
-                outline: 'none', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box',
-              }}
+              className="filter-input"
+              style={{ width: '100%', fontSize: 13, resize: 'vertical' }}
             />
           </div>
         </Section>
@@ -480,7 +488,6 @@ export default function Settings() {
         {/* Workspace */}
         <Section
           title="Workspace"
-          icon="🌐"
           description="Region, currency, and how data refreshes."
         >
           <SelectRow
@@ -532,7 +539,6 @@ export default function Settings() {
         {/* Security */}
         <Section
           title="Security"
-          icon="🔒"
           description="Keep your account safe."
         >
           <ToggleRow
@@ -566,7 +572,6 @@ export default function Settings() {
         {/* Data & privacy */}
         <Section
           title="Data & privacy"
-          icon="🛡️"
           description="Your data is yours. Export it or delete it anytime."
         >
           <ActionRow
@@ -585,32 +590,27 @@ export default function Settings() {
               }
             }}
           />
-          <div style={{
-            padding: '14px 0', borderTop: '1px solid #fecaca', marginTop: 8,
-          }}>
+          <div style={{ padding: '14px 0' }}>
             <div style={{
-              fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase',
-              color: '#b91c1c', marginBottom: 10,
+              fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+              color: 'var(--bad)', marginBottom: 10,
             }}>Danger zone</div>
             <div style={{
-              border: '1px solid #fecaca', borderRadius: 12, padding: 16, background: '#fef2f2',
+              border: '1px solid #f6c9d3', borderRadius: 10, padding: 16, background: 'var(--bad-soft)',
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
             }}>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#991b1b' }}>Delete account</div>
-                <div style={{ fontSize: 12, color: '#7f1d1d', marginTop: 3 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--bad)' }}>Delete account</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
                   Permanently remove your account, properties, and review history. This cannot be undone.
                 </div>
               </div>
               {!confirmDelete ? (
                 <button
                   type="button"
+                  className="btn btn-danger btn-sm"
                   onClick={() => setConfirmDelete(true)}
-                  style={{
-                    background: '#fff', color: '#b91c1c', border: '1px solid #fca5a5',
-                    padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700,
-                    cursor: 'pointer', flexShrink: 0,
-                  }}
+                  style={{ flexShrink: 0, background: 'var(--surface)' }}
                 >
                   Delete account
                 </button>
@@ -618,21 +618,16 @@ export default function Settings() {
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                   <button
                     type="button"
+                    className="btn btn-secondary btn-sm"
                     onClick={() => setConfirmDelete(false)}
-                    style={{
-                      background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb',
-                      padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    }}
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
+                    className="btn btn-sm"
                     onClick={() => alert('Account deletion requires support — coming soon.')}
-                    style={{
-                      background: '#dc2626', color: '#fff', border: 'none',
-                      padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                    }}
+                    style={{ background: 'var(--bad)', color: '#fff' }}
                   >
                     Confirm delete
                   </button>
@@ -643,6 +638,133 @@ export default function Settings() {
         </Section>
       </div>
     </ThemedPage>
+  )
+}
+
+function BillingSection() {
+  const [status, setStatus] = useState<BillingStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const sessionId = params.get('session_id')
+    const fromCheckout = params.get('billing') === 'success' && !!sessionId
+
+    async function init() {
+      try {
+        if (fromCheckout) {
+          const s = await confirmCheckout(sessionId!)
+          setStatus(s)
+          if (s.has_pro) setNotice('🎉 Welcome to Pro — your subscription is active.')
+          window.history.replaceState({}, '', '/settings')
+        } else {
+          setStatus(await fetchBillingStatus())
+        }
+      } catch (e: any) {
+        setError(e.message || 'Failed to load billing status')
+      } finally {
+        setLoading(false)
+      }
+    }
+    init()
+  }, [])
+
+  async function upgrade() {
+    setBusy(true)
+    setError('')
+    try {
+      window.location.href = await startCheckout()
+    } catch (e: any) {
+      setError(e.message || 'Checkout failed')
+      setBusy(false)
+    }
+  }
+
+  async function manage() {
+    setBusy(true)
+    setError('')
+    try {
+      window.location.href = await openBillingPortal()
+    } catch (e: any) {
+      setError(e.message || 'Failed to open billing portal')
+      setBusy(false)
+    }
+  }
+
+  const hasPro = !!status?.has_pro
+
+  return (
+    <Section
+      title="Billing & plan"
+      description="Your subscription, payment method, and invoices."
+    >
+      {notice && (
+        <div style={{
+          background: 'var(--good-soft)', border: '1px solid #c4ebda', color: 'var(--good)',
+          borderRadius: 10, padding: '10px 14px', fontSize: 13, fontWeight: 600, marginBottom: 14,
+        }}>
+          {notice}
+        </div>
+      )}
+
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 0', gap: 16,
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>
+              {loading ? 'Loading plan…' : `${status?.plan ?? 'Starter'} plan`}
+            </span>
+            <span
+              className={hasPro ? 'chip chip-accent' : 'chip'}
+              style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', padding: '2px 8px' }}
+            >
+              {loading ? '…' : status?.trialing ? 'Trial' : hasPro ? 'Active' : 'Free'}
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>
+            {loading
+              ? ' '
+              : hasPro
+                ? [
+                    status ? formatPrice(status) : '',
+                    status?.trialing && status.trial_end
+                      ? `free trial ends ${new Date(status.trial_end).toLocaleDateString()}${status.cancel_at_period_end ? ', then cancels' : ', then billing starts'}`
+                      : status?.current_period_end
+                        ? `${status.cancel_at_period_end ? 'ends' : 'renews'} ${new Date(status.current_period_end).toLocaleDateString()}`
+                        : '',
+                  ].filter(Boolean).join(' · ')
+                : '1 property, Booking.com sync, daily refresh. Upgrade for all OTAs + AI insights.'}
+          </div>
+        </div>
+        <button
+          type="button"
+          className={hasPro ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'}
+          onClick={hasPro ? manage : upgrade}
+          disabled={busy || loading}
+          style={{ flexShrink: 0, cursor: busy ? 'wait' : undefined }}
+        >
+          {busy
+            ? 'Redirecting…'
+            : hasPro
+              ? 'Manage billing'
+              : status?.trial_eligible
+                ? 'Start 14-day free trial'
+                : 'Upgrade to Pro'}
+        </button>
+      </div>
+
+      {error && (
+        <div style={{ fontSize: 12, color: 'var(--bad)', marginTop: 8 }}>{error}</div>
+      )}
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 10 }}>
+        Payments are processed by Stripe. Cancel anytime from the billing portal.
+      </div>
+    </Section>
   )
 }
 
@@ -704,34 +826,27 @@ function ManualSyncSection() {
     return map as Record<SyncDomain, SyncStatusRow | undefined>
   }, [rows])
 
-  const domains: Array<{ key: SyncDomain; label: string; icon: string }> = [
-    { key: 'reviews',   label: 'Reviews',   icon: '⭐' },
-    { key: 'rates',     label: 'Rates',     icon: '💰' },
-    { key: 'calendar',  label: 'Calendar',  icon: '📅' },
-    { key: 'analytics', label: 'Analytics', icon: '📊' },
+  const domains: Array<{ key: SyncDomain; label: string }> = [
+    { key: 'reviews',   label: 'Reviews' },
+    { key: 'rates',     label: 'Rates' },
+    { key: 'calendar',  label: 'Calendar' },
+    { key: 'analytics', label: 'Analytics' },
   ]
 
   return (
     <Section
       title="Manual sync"
-      icon="🔄"
       description="Force a refresh now. All four normally sync once a day at 03:00 UTC."
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div style={{ fontSize: 12, color: '#6b7280' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
           Trigger an individual refresh, or fire all four at once.
         </div>
         <button
           type="button"
+          className="btn btn-primary btn-sm"
           onClick={runAll}
           disabled={!!anyRunning || Object.values(busy).some(Boolean)}
-          style={{
-            background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 100%)',
-            color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 8,
-            fontSize: 12, fontWeight: 700, cursor: 'pointer',
-            boxShadow: '0 3px 10px rgba(168,85,247,0.3)',
-            opacity: (anyRunning || Object.values(busy).some(Boolean)) ? 0.6 : 1,
-          }}
         >
           Sync all
         </button>
@@ -741,58 +856,47 @@ function ManualSyncSection() {
         const row = byDomain[d.key]
         const running = row?.status === 'running' || busy[d.key]
         const failed = row?.status === 'failed'
-        const dotColor = failed ? '#ef4444' : running ? '#f59e0b' : row?.last_synced_at ? '#10b981' : '#cbd5e1'
+        const dotColor = failed ? 'var(--bad)' : running ? 'var(--warn)' : row?.last_synced_at ? 'var(--good)' : 'var(--border-strong)'
         return (
           <div key={d.key} style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '12px 0', borderBottom: '1px solid #f5f3ff', gap: 16,
+            padding: '12px 0', borderBottom: '1px solid var(--border)', gap: 16,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
-              <span style={{
-                width: 32, height: 32, borderRadius: 9, background: '#faf5ff',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
-              }}>{d.icon}</span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a2e' }}>
-                  {d.label}
-                  {row?.last_record_count !== undefined && row.last_record_count > 0 && (
-                    <span style={{ marginLeft: 8, fontSize: 11, color: '#6b21a8', fontWeight: 600 }}>
-                      {row.last_record_count} record{row.last_record_count === 1 ? '' : 's'} last run
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                  <span style={{
-                    width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0,
-                  }} />
-                  <span style={{ fontSize: 12, color: '#6b7280' }}>
-                    {failed
-                      ? 'Last run failed'
-                      : running
-                        ? 'Syncing now…'
-                        : row?.last_synced_at
-                          ? `Updated ${formatRelative(row.last_synced_at)}`
-                          : 'Never synced'}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
+                {d.label}
+                {row?.last_record_count !== undefined && row.last_record_count > 0 && (
+                  <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>
+                    {row.last_record_count} record{row.last_record_count === 1 ? '' : 's'} last run
                   </span>
-                </div>
-                {failed && row?.last_error && (
-                  <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 3 }}>
-                    {row.last_error.slice(0, 160)}
-                  </div>
                 )}
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%', background: dotColor, flexShrink: 0,
+                }} />
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {failed
+                    ? 'Last run failed'
+                    : running
+                      ? 'Syncing now…'
+                      : row?.last_synced_at
+                        ? `Updated ${formatRelative(row.last_synced_at)}`
+                        : 'Never synced'}
+                </span>
+              </div>
+              {failed && row?.last_error && (
+                <div style={{ fontSize: 11, color: 'var(--bad)', marginTop: 3 }}>
+                  {row.last_error.slice(0, 160)}
+                </div>
+              )}
             </div>
             <button
               type="button"
+              className="btn btn-secondary btn-sm"
               onClick={() => runOne(d.key)}
               disabled={running}
-              style={{
-                background: running ? '#f3f4f6' : '#fff',
-                color: running ? '#9ca3af' : '#7c3aed',
-                border: running ? '1px solid #e5e7eb' : '1px solid #e9d5ff',
-                padding: '7px 14px', borderRadius: 999, fontSize: 12, fontWeight: 700,
-                cursor: running ? 'wait' : 'pointer', flexShrink: 0,
-              }}
+              style={{ flexShrink: 0, cursor: running ? 'wait' : undefined }}
             >
               {running ? 'Syncing…' : 'Sync now'}
             </button>
@@ -800,9 +904,9 @@ function ManualSyncSection() {
         )
       })}
       {error && (
-        <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 8 }}>{error}</div>
+        <div style={{ fontSize: 12, color: 'var(--bad)', marginTop: 8 }}>{error}</div>
       )}
-      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 10 }}>
         Tip: real-time and sub-daily intervals are on the roadmap.
       </div>
     </Section>
@@ -837,43 +941,35 @@ function NotificationEmail({ accountEmail, override, onChange }: {
 
   return (
     <div style={{
-      padding: 14, marginBottom: 10, borderRadius: 12,
-      background: 'linear-gradient(135deg, #fdf4ff 0%, #f5f3ff 100%)',
-      border: '1px solid #f3e8ff',
+      padding: 14, marginBottom: 10, borderRadius: 10,
+      background: 'var(--surface-2)',
+      border: '1px solid var(--border)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: editing ? 10 : 0 }}>
-        <span style={{
-          width: 30, height: 30, borderRadius: 9, background: '#fff',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 14, flexShrink: 0, boxShadow: '0 1px 3px rgba(168,85,247,0.15)',
-        }}>📧</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 10, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase',
-            color: '#7c3aed', marginBottom: 2,
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+            color: 'var(--text-faint)', marginBottom: 2,
           }}>
             Alerts will be sent to
           </div>
           <div style={{
-            fontSize: 13, fontWeight: 700, color: '#1a1a2e',
+            fontSize: 13, fontWeight: 700, color: 'var(--ink)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             {effective || 'No email on file'}
           </div>
           {override && (
-            <div style={{ fontSize: 11, color: '#7c3aed', marginTop: 2, fontWeight: 600 }}>
+            <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 2, fontWeight: 600 }}>
               Override of your account email ({accountEmail}).
             </div>
           )}
         </div>
         <button
           type="button"
+          className="btn btn-secondary btn-sm"
           onClick={() => { setEditing(e => !e); setDraft(override || accountEmail); setError('') }}
-          style={{
-            background: '#fff', color: '#7c3aed', border: '1px solid #e9d5ff',
-            padding: '6px 12px', borderRadius: 999, fontSize: 11, fontWeight: 700,
-            cursor: 'pointer', flexShrink: 0, letterSpacing: '0.03em',
-          }}
+          style={{ flexShrink: 0 }}
         >
           {editing ? 'Cancel' : override ? 'Edit' : 'Change'}
         </button>
@@ -883,48 +979,43 @@ function NotificationEmail({ accountEmail, override, onChange }: {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input
             type="email"
+            className="filter-input"
             value={draft}
             onChange={e => { setDraft(e.target.value); setError('') }}
             placeholder="alerts@yourhotel.com"
             style={{
-              flex: 1, minWidth: 220, padding: '9px 12px', fontSize: 13, borderRadius: 8,
-              border: `1px solid ${error ? '#fca5a5' : '#e9d5ff'}`, background: '#fff',
-              color: '#1a1a2e', outline: 'none', fontFamily: 'inherit',
+              flex: 1, minWidth: 220, fontSize: 13,
+              borderColor: error ? 'var(--bad)' : undefined,
             }}
           />
           <button
             type="button"
+            className="btn btn-primary btn-sm"
             onClick={save}
-            style={{
-              background: 'linear-gradient(135deg, #a855f7 0%, #ec4899 100%)',
-              color: '#fff', border: 'none', padding: '9px 16px', borderRadius: 8,
-              fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
-            }}
+            style={{ flexShrink: 0 }}
           >
             Save
           </button>
           {override && (
             <button
               type="button"
+              className="btn btn-ghost btn-sm"
               onClick={clearOverride}
-              style={{
-                background: '#fff', color: '#6b7280', border: '1px solid #e5e7eb',
-                padding: '9px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0,
-              }}
+              style={{ flexShrink: 0 }}
             >
               Use account email
             </button>
           )}
           {error && (
-            <div style={{ width: '100%', fontSize: 11, color: '#b91c1c', marginTop: 2 }}>
+            <div style={{ width: '100%', fontSize: 11, color: 'var(--bad)', marginTop: 2 }}>
               {error}
             </div>
           )}
         </div>
       )}
       {!editing && (
-        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>
-          Want alerts to go to a shared inbox (e.g. <code style={{ background: '#fff', padding: '1px 4px', borderRadius: 4 }}>alerts@hotel.com</code>)? Use "Change" above.
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+          Want alerts to go to a shared inbox (e.g. <code style={{ background: 'var(--surface)', border: '1px solid var(--border)', padding: '1px 4px', borderRadius: 4 }}>alerts@hotel.com</code>)? Use "Change" above.
         </div>
       )}
     </div>
@@ -937,25 +1028,19 @@ function ActionRow({ label, description, buttonLabel, onClick, danger }: {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '12px 0', borderBottom: '1px solid #f5f3ff', gap: 16,
+      padding: '12px 0', borderBottom: '1px solid var(--border)', gap: 16,
     }}>
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: '#1a1a2e' }}>{label}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{label}</div>
         {description && (
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>{description}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{description}</div>
         )}
       </div>
       <button
         type="button"
+        className={danger ? 'btn btn-danger btn-sm' : 'btn btn-secondary btn-sm'}
         onClick={onClick}
-        style={{
-          background: danger ? '#fff' : 'linear-gradient(135deg, #a855f7 0%, #ec4899 100%)',
-          color: danger ? '#b91c1c' : '#fff',
-          border: danger ? '1px solid #fca5a5' : 'none',
-          padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: 700,
-          cursor: 'pointer', letterSpacing: '0.02em', flexShrink: 0,
-          boxShadow: danger ? 'none' : '0 3px 10px rgba(168,85,247,0.3)',
-        }}
+        style={{ flexShrink: 0 }}
       >
         {buttonLabel}
       </button>
