@@ -58,6 +58,7 @@ class NotificationSettingsOut(Schema):
     negative_alerts: bool
     daily_digest: bool
     weekly_summary: bool
+    monthly_report: bool
     rate_changes: bool
     sync_failures: bool
     marketing: bool
@@ -69,6 +70,7 @@ class NotificationSettingsIn(Schema):
     negative_alerts: bool | None = None
     daily_digest: bool | None = None
     weekly_summary: bool | None = None
+    monthly_report: bool | None = None
     rate_changes: bool | None = None
     sync_failures: bool | None = None
     marketing: bool | None = None
@@ -81,6 +83,7 @@ _NOTIFICATION_FIELDS = {
     "negative_alerts": "notify_negative_reviews",
     "daily_digest": "notify_daily_digest",
     "weekly_summary": "notify_weekly_summary",
+    "monthly_report": "notify_monthly_report",
     "rate_changes": "notify_rate_changes",
     "sync_failures": "notify_sync_failures",
     "marketing": "receive_product_update_emails",

@@ -44,6 +44,13 @@ weekly_summary_schedule, _ = CrontabSchedule.objects.get_or_create(
 rate_alerts_schedule, _ = CrontabSchedule.objects.get_or_create(
     minute=45, hour=13, **crontab_defaults
 )
+monthly_report_schedule, _ = CrontabSchedule.objects.get_or_create(
+    minute=30,
+    hour=14,
+    day_of_month="1",
+    day_of_week="*",
+    month_of_year="*",
+)
 
 
 # TODO(devkosal): manage hardcoded tasks in settings.py
@@ -93,6 +100,10 @@ TASKS = [
     CeleryTaskMetaData(
         "reptruly.reviews.tasks.send_rate_opportunity_alerts",
         crontab=rate_alerts_schedule,
+    ),
+    CeleryTaskMetaData(
+        "reptruly.users.tasks.send_monthly_reports",
+        crontab=monthly_report_schedule,
     ),
 ]
 

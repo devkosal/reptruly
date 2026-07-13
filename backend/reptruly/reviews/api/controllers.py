@@ -1134,6 +1134,33 @@ def _rates_cache_key(property_id: UUID, checkin: str, checkout: str, adults: int
     return f"rates:v2:{property_id}:{checkin}:{checkout}:{adults}"
 
 
+@api_controller("/badge", tags=["Badge"], auth=None)
+class BadgeAPI:
+
+    @http_get("/{property_id}/badge.svg")
+    def property_badge(self, request, property_id: UUID, theme: str = "light"):
+        """Public, embeddable review-score badge for a property.
+
+        No auth by design: the UUID is unguessable, the numbers are public on
+        the OTAs, and the badge carries reptruly branding.
+        """
+        from django.http import HttpResponse
+
+        from reptruly.reviews.badge import render_badge_svg
+
+        try:
+            prop = Property.objects.get(id=property_id)
+        except Property.DoesNotExist:
+            raise HttpError(404, "Property not found")
+        if theme not in ("light", "dark"):
+            theme = "light"
+        response = HttpResponse(
+            render_badge_svg(prop, theme), content_type="image/svg+xml"
+        )
+        response["Cache-Control"] = "public, max-age=3600"
+        return response
+
+
 @api_controller("/rates", tags=["Rates"], auth=None)
 class RatesAPI:
 

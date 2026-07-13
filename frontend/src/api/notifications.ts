@@ -4,6 +4,7 @@ export interface NotificationSettings {
   negative_alerts: boolean
   daily_digest: boolean
   weekly_summary: boolean
+  monthly_report: boolean
   rate_changes: boolean
   sync_failures: boolean
   marketing: boolean

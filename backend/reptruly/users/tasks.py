@@ -1,7 +1,9 @@
 """User-facing scheduled emails. Registered in scripts/add_scheduled_tasks.py."""
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
+from urllib.parse import quote
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
@@ -10,6 +12,7 @@ from reptruly.reviews.models import Property, Review
 from reptruly.users.emails import (
     NEGATIVE_SCORE_MAX,
     send_daily_digest_email,
+    send_monthly_report_email,
     send_weekly_summary_email,
 )
 from reptruly.users.models import Preferences
@@ -103,6 +106,64 @@ def send_daily_digests():
         send_daily_digest_email(user, prefs.alert_recipient, stats)
         sent += 1
     logger.info("Daily digests sent: %d", sent)
+    return {"sent": sent}
+
+
+def _previous_month_window(today: date) -> tuple[date, date, str]:
+    """(first day, last day, human label) of the previous calendar month."""
+    last_of_prev = today.replace(day=1) - timedelta(days=1)
+    first_of_prev = last_of_prev.replace(day=1)
+    return first_of_prev, last_of_prev, last_of_prev.strftime("%B %Y")
+
+
+def _monthly_property_stats(prop: Property, start: date, end: date) -> dict:
+    """Last month's numbers keyed on the guest-facing review date, matching
+    the from/to filters of the linked report page."""
+    ids = [
+        pid
+        for pid in (prop.booking_hotel_id, prop.expedia_property_id, prop.google_place_id)
+        if pid
+    ]
+    reviews = list(
+        Review.objects.filter(
+            property_id__in=ids,
+            reviewed_at__date__gte=start,
+            reviewed_at__date__lte=end,
+        )
+    ) if ids else []
+    scores = [r.overall_score for r in reviews if r.overall_score is not None]
+    total = len(reviews)
+    return {
+        "name": prop.property_name,
+        "total": total,
+        "avg": round(sum(scores) / len(scores), 1) if scores else 0,
+        "negatives": sum(1 for s in scores if s <= NEGATIVE_SCORE_MAX),
+        "reply_rate": round(100 * sum(1 for r in reviews if r.has_reply) / total) if total else 0,
+        "report_url": (
+            f"{settings.DOMAIN_NAME}/analytics/report"
+            f"?from={start.isoformat()}&to={end.isoformat()}"
+            f"&property={quote(prop.property_name)}"
+        ),
+    }
+
+
+@celery_app.task()
+def send_monthly_reports():
+    """First of the month: email opted-in owners last month's per-property
+    report with deep links to the printable version."""
+    start, end, label = _previous_month_window(timezone.now().date())
+    sent = 0
+    for prefs in _opted_in("notify_monthly_report"):
+        user = prefs.user
+        if not prefs.alert_recipient:
+            continue
+        properties = list(user.properties.all())
+        if not properties:
+            continue
+        stats = [_monthly_property_stats(p, start, end) for p in properties]
+        send_monthly_report_email(user, prefs.alert_recipient, label, stats)
+        sent += 1
+    logger.info("Monthly reports sent: %d", sent)
     return {"sent": sent}
 
 

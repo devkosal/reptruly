@@ -11,6 +11,7 @@ import {
 } from '../api/notifications'
 import ThemedPage from '../components/ThemedPage'
 import { useAuth } from '../context/AuthContext'
+import { useProperty } from '../context/PropertyContext'
 
 interface SettingsState {
   notifications: {
@@ -19,6 +20,7 @@ interface SettingsState {
     negative_alerts: boolean
     daily_digest: boolean
     weekly_summary: boolean
+    monthly_report: boolean
     rate_changes: boolean
     sync_failures: boolean
     marketing: boolean
@@ -49,6 +51,7 @@ const DEFAULT_SETTINGS: SettingsState = {
     negative_alerts: true,
     daily_digest: false,
     weekly_summary: true,
+    monthly_report: true,
     rate_changes: true,
     sync_failures: true,
     marketing: false,
@@ -353,6 +356,8 @@ export default function Settings() {
 
         <BillingSection />
 
+        <BadgeSection />
+
         {/* Notifications */}
         <Section
           title="Notifications"
@@ -387,6 +392,12 @@ export default function Settings() {
             description="Monday morning recap of last week's performance."
             checked={settings.notifications.weekly_summary}
             onChange={v => patch('notifications', { weekly_summary: v })}
+          />
+          <ToggleRow
+            label="Monthly owner report"
+            description="On the 1st: last month's numbers per property, with a link to the printable report."
+            checked={settings.notifications.monthly_report}
+            onChange={v => patch('notifications', { monthly_report: v })}
           />
           <ToggleRow
             label="Rate movement alerts"
@@ -640,6 +651,124 @@ export default function Settings() {
     </ThemedPage>
   )
 }
+
+function BadgeSection() {
+  const { properties } = useProperty()
+  const [propId, setPropId] = useState('')
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [copied, setCopied] = useState(false)
+  // The badge is cached for an hour; bust it once per page visit so the
+  // preview always reflects the latest sync.
+  const previewBuster = useMemo(() => Date.now(), [])
+
+  const selected = properties.find(p => p.id === propId) || properties[0]
+  if (!selected) {
+    return (
+      <Section
+        title="Website badge"
+        description="Show your live review score on your own website."
+      >
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+          Connect a property first — then you'll get an embeddable badge here.
+        </p>
+      </Section>
+    )
+  }
+
+  const origin = window.location.origin
+  const badgeUrl = `${origin}/api/badge/${selected.id}/badge.svg?theme=${theme}`
+  const previewUrl = `${badgeUrl}&_=${previewBuster}`
+  const embedCode =
+    `<a href="https://reptruly.com" target="_blank" rel="noopener">\n` +
+    `  <img src="${badgeUrl}" alt="${selected.property_name} guest review score" width="320" height="76" />\n` +
+    `</a>`
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(embedCode)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    } catch {
+      /* clipboard unavailable — user can select the code manually */
+    }
+  }
+
+  return (
+    <Section
+      title="Website badge"
+      description="A live review-score badge for your own website — updates automatically as reviews come in."
+    >
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+        {properties.length > 1 && (
+          <select
+            className="filter-select"
+            value={selected.id}
+            onChange={e => setPropId(e.target.value)}
+            style={{ fontSize: 13 }}
+          >
+            {properties.map(p => (
+              <option key={p.id} value={p.id}>{p.property_name}</option>
+            ))}
+          </select>
+        )}
+        <div className="seg">
+          <button
+            type="button"
+            className={`seg-btn ${theme === 'light' ? 'active' : ''}`}
+            onClick={() => setTheme('light')}
+          >
+            Light
+          </button>
+          <button
+            type="button"
+            className={`seg-btn ${theme === 'dark' ? 'active' : ''}`}
+            onClick={() => setTheme('dark')}
+          >
+            Dark
+          </button>
+        </div>
+      </div>
+
+      <div style={{
+        padding: 20, borderRadius: 12, marginBottom: 14,
+        background: theme === 'dark' ? 'var(--ink)' : 'var(--surface-2)',
+        border: '1px solid var(--border)', display: 'flex', justifyContent: 'center',
+      }}>
+        <img
+          key={previewUrl}
+          src={previewUrl}
+          alt={`${selected.property_name} review badge preview`}
+          width={320}
+          height={76}
+        />
+      </div>
+
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
+        Paste this into your website
+      </div>
+      <textarea
+        readOnly
+        value={embedCode}
+        onFocus={e => e.currentTarget.select()}
+        style={{
+          width: '100%', minHeight: 76, resize: 'vertical',
+          fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11.5,
+          border: '1px solid var(--border-strong)', borderRadius: 10, padding: 10,
+          color: 'var(--text)', background: 'var(--surface-2)', boxSizing: 'border-box',
+        }}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={copy}>
+          {copied ? '✓ Copied' : 'Copy embed code'}
+        </button>
+        <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+          Works anywhere an image tag works — Wix, Squarespace, WordPress, plain HTML.
+        </span>
+      </div>
+    </Section>
+  )
+}
+
 
 function BillingSection() {
   const [status, setStatus] = useState<BillingStatus | null>(null)

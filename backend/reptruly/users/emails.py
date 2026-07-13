@@ -300,6 +300,41 @@ def send_rate_opportunity_email(user: User, recipient: str, opportunities: list[
     )
 
 
+def send_monthly_report_email(
+    user: User, recipient: str, month_label: str, properties: list[dict]
+) -> None:
+    """First-of-month owner report: last month's numbers per property with a
+    deep link to the printable report for each."""
+    if not properties:
+        return
+    blocks = []
+    for p in properties:
+        stats_line = (
+            f"    {p['total']} review{'s' if p['total'] != 1 else ''}"
+            + (f" · average {p['avg']}/10" if p["total"] else "")
+            + (f" · {p['negatives']} negative" if p["negatives"] else "")
+            + (f" · reply rate {p['reply_rate']}%" if p["total"] else "")
+        )
+        blocks.append(
+            f"  {p['name']}\n{stats_line}\n"
+            f"    Full report (print to PDF): {p['report_url']}"
+        )
+    send_mail(
+        subject=f"Your {month_label} report is ready",
+        message=(
+            f"Hi {user.name or user.username},\n\n"
+            f"Here's how {month_label} went:\n\n"
+            + "\n\n".join(blocks)
+            + "\n\nEach link opens the owner-ready report — use your browser's "
+            "Download PDF button to save or forward it.\n\n"
+            "— reptruly reports"
+        ),
+        from_email=None,
+        recipient_list=[recipient],
+        fail_silently=True,
+    )
+
+
 def send_pro_subscription_emails(user: User) -> None:
     """Notify the subscriber and the admins about a new Pro subscription."""
     name = user.name or user.username

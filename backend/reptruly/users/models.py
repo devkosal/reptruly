@@ -100,6 +100,7 @@ class Preferences(UUIDModel):
     )
     notify_daily_digest = BooleanField(_("Daily digest"), default=False)
     notify_weekly_summary = BooleanField(_("Weekly summary"), default=True)
+    notify_monthly_report = BooleanField(_("Monthly owner report"), default=True)
     notify_rate_changes = BooleanField(_("Rate movement alerts"), default=True)
     notify_sync_failures = BooleanField(_("Sync failure alerts"), default=True)
 

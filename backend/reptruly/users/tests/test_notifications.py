@@ -9,7 +9,12 @@ from reptruly.users.emails import (
     send_welcome_email,
 )
 from reptruly.users.models import Preferences, User
-from reptruly.users.tasks import send_daily_digests, send_weekly_summaries
+from reptruly.users.tasks import (
+    _previous_month_window,
+    send_daily_digests,
+    send_monthly_reports,
+    send_weekly_summaries,
+)
 from reptruly.users.tests.factories import UserFactory
 from reptruly.users.verification import make_token, verify_token
 
@@ -225,6 +230,59 @@ class TestWeeklySummary:
         Preferences.objects.create(user=user, notify_weekly_summary=True)
         assert send_weekly_summaries() == {"sent": 0}
         assert len(mail.outbox) == 0
+
+
+class TestMonthlyReport:
+    def test_previous_month_window(self):
+        from datetime import date
+
+        start, end, label = _previous_month_window(date(2026, 7, 1))
+        assert (start, end) == (date(2026, 6, 1), date(2026, 6, 30))
+        assert label == "June 2026"
+        # January rolls back across the year boundary.
+        start, end, label = _previous_month_window(date(2026, 1, 15))
+        assert (start, end) == (date(2025, 12, 1), date(2025, 12, 31))
+
+    def test_sends_report_with_stats_and_link(self):
+        from datetime import datetime, timezone as tz
+
+        from django.utils import timezone as dj_tz
+
+        user = UserFactory(email="owner@example.com")
+        Preferences.objects.create(user=user, notify_monthly_report=True)
+        prop = _property_with_reviews(user, [])
+        # Reviews dated inside the previous calendar month.
+        start, _, _ = _previous_month_window(dj_tz.now().date())
+        for i, score in enumerate([9.0, 3.0]):
+            Review.objects.create(
+                channex_id=f"booking_month_{i}",
+                property_id="d123",
+                property_name=prop.property_name,
+                ota_name="Booking.com",
+                overall_score=score,
+                has_reply=(i == 0),
+                reviewed_at=datetime(start.year, start.month, 5 + i, 12, 0, tzinfo=tz.utc),
+            )
+        result = send_monthly_reports()
+        assert result == {"sent": 1}
+        assert len(mail.outbox) == 1
+        body = mail.outbox[0].body
+        assert "report is ready" in mail.outbox[0].subject
+        assert "2 reviews" in body and "1 negative" in body and "reply rate 50%" in body
+        assert f"/analytics/report?from={start.isoformat()}" in body
+        assert "property=Digest%20Hotel" in body
+
+    def test_respects_toggle_off(self):
+        user = UserFactory()
+        Preferences.objects.create(user=user, notify_monthly_report=False)
+        _property_with_reviews(user, [5.0])
+        assert send_monthly_reports() == {"sent": 0}
+        assert len(mail.outbox) == 0
+
+    def test_skips_users_without_properties(self):
+        user = UserFactory()
+        Preferences.objects.create(user=user, notify_monthly_report=True)
+        assert send_monthly_reports() == {"sent": 0}
 
 
 class TestProSubscriptionEmails:

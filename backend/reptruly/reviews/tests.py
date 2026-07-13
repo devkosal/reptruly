@@ -6,7 +6,7 @@ from django.core import mail
 from django.core.cache import cache
 
 from reptruly.billing.entitlements import PRO, STARTER
-from reptruly.reviews.models import Property
+from reptruly.reviews.models import Property, Review
 from reptruly.reviews.rate_alerts import (
     _sent_key,
     find_opportunities,
@@ -112,6 +112,58 @@ class TestFindOpportunities:
             opps = find_opportunities(prop)
         assert rates_mock.call_count == 3
         assert len(opps) == 3
+
+
+class TestBadge:
+    def setup_method(self):
+        cache.clear()
+
+    def _prop_with_reviews(self):
+        prop = Property.objects.create(
+            user=UserFactory(),
+            property_name="Badge & Hotel <NYC>",
+            booking_hotel_id="b1",
+        )
+        for i, score in enumerate([9.0, 8.0]):
+            Review.objects.create(
+                channex_id=f"badge_{i}",
+                property_id="b1",
+                property_name=prop.property_name,
+                ota_name="Booking.com",
+                overall_score=score,
+            )
+        return prop
+
+    def test_badge_is_public_and_renders_stats(self, client):
+        prop = self._prop_with_reviews()
+        res = client.get(f"/api/badge/{prop.id}/badge.svg")
+        assert res.status_code == 200
+        assert res["Content-Type"] == "image/svg+xml"
+        assert res["Cache-Control"] == "public, max-age=3600"
+        svg = res.content.decode()
+        assert ">8.5<" in svg
+        assert "2 reviews" in svg
+        assert "powered by" in svg
+        # XML-escaped property name — no raw < or & from user data.
+        assert "Badge &amp; Hotel &lt;NYC&gt;" in svg
+
+    def test_dark_theme_and_bad_theme_fallback(self, client):
+        prop = self._prop_with_reviews()
+        dark = client.get(f"/api/badge/{prop.id}/badge.svg?theme=dark").content.decode()
+        assert "#0b1220" in dark.split(">")[1]  # dark background rect
+        weird = client.get(f"/api/badge/{prop.id}/badge.svg?theme=neon")
+        assert weird.status_code == 200
+
+    def test_no_reviews_shows_placeholder(self, client):
+        prop = Property.objects.create(
+            user=UserFactory(), property_name="Fresh Hotel", booking_hotel_id="b2"
+        )
+        svg = client.get(f"/api/badge/{prop.id}/badge.svg").content.decode()
+        assert "–" in svg and "Guest reviews" in svg
+
+    def test_unknown_property_404(self, client):
+        res = client.get("/api/badge/00000000-0000-0000-0000-000000000000/badge.svg")
+        assert res.status_code == 404
 
 
 class TestSendRateOpportunityAlerts:
