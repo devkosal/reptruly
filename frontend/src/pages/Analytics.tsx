@@ -529,6 +529,7 @@ type ViewMode = 'overview' | 'insights'
 
 // Report time-period presets — drives the `days` param passed to the report page.
 const REPORT_PERIODS: { value: string; label: string }[] = [
+  { value: 'page', label: 'Same as page filter' },
   { value: '1', label: 'Today (last 24h)' },
   { value: '2', label: 'Last 2 days' },
   { value: '3', label: 'Last 3 days' },
@@ -631,20 +632,40 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
   const hasDateFilter = !!(fromDate || toDate)
 
   const isCustomReport = reportDays === 'custom'
+  // "Same as page filter": reuse the page's date-range filter for the report.
+  // Needs at least a From date; an empty To means "up to today".
+  const isPageReport = reportDays === 'page'
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const pageReportFrom = fromParam
+  const pageReportTo = toParam || todayStr
+  const pageReportReady = !!fromParam
   // For a custom range both dates must be complete before the report can be generated.
   const customReportReady = isCompleteDate(reportFrom) && isCompleteDate(reportTo) && reportFrom <= reportTo
-  const reportReady = !isCustomReport || customReportReady
+  const reportReady = isPageReport ? pageReportReady : (!isCustomReport || customReportReady)
 
-  const reportQuery = isCustomReport
-    ? `from=${reportFrom}&to=${reportTo}`
-    : `days=${reportDays}`
+  const reportQuery = isPageReport
+    ? `from=${pageReportFrom}&to=${pageReportTo}`
+    : isCustomReport
+      ? `from=${reportFrom}&to=${reportTo}`
+      : `days=${reportDays}`
   const reportHref = propertyName
     ? `/analytics/report?${reportQuery}&property=${encodeURIComponent(propertyName)}`
     : `/analytics/report?${reportQuery}`
 
-  const reportPeriodLabel = isCustomReport
-    ? (customReportReady ? `${reportFrom} → ${reportTo}` : 'custom range')
-    : (REPORT_PERIODS.find(p => p.value === reportDays)?.label ?? `last ${reportDays} days`)
+  const reportPeriodLabel = isPageReport
+    ? (pageReportReady ? `${pageReportFrom} → ${pageReportTo}` : 'same range as the page filter')
+    : isCustomReport
+      ? (customReportReady ? `${reportFrom} → ${reportTo}` : 'custom range')
+      : (REPORT_PERIODS.find(p => p.value === reportDays)?.label ?? `last ${reportDays} days`)
+
+  const reportDisabledHint = isPageReport
+    ? 'Set at least a From date in the page filter on the left first'
+    : 'Pick a valid start and end date'
+
+  // "covering the last 30 days" but "covering 2026-06-01 → 2026-07-19".
+  const reportCoverageText = /^\d/.test(reportPeriodLabel)
+    ? reportPeriodLabel
+    : `the ${reportPeriodLabel.toLowerCase()}`
 
   return (
     <>
@@ -708,8 +729,8 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
             {aiLocked
-              ? <>A shareable PDF for <strong>{propertyName ?? 'all properties'}</strong> covering the {reportPeriodLabel.toLowerCase()}: review volumes, average scores and trends per OTA. Upgrade to Pro to add AI insights and topic scores.</>
-              : <>A shareable PDF for <strong>{propertyName ?? 'all properties'}</strong> covering the {reportPeriodLabel.toLowerCase()}: review volumes, average scores and trends per OTA, plus AI insights and topic scores.</>}
+              ? <>A shareable PDF for <strong>{propertyName ?? 'all properties'}</strong> covering {reportCoverageText}: review volumes, average scores and trends per OTA. Upgrade to Pro to add AI insights and topic scores.</>
+              : <>A shareable PDF for <strong>{propertyName ?? 'all properties'}</strong> covering {reportCoverageText}: review volumes, average scores and trends per OTA, plus AI insights and topic scores.</>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <label htmlFor="report-period" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
@@ -761,11 +782,16 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
               </a>
             ) : (
               <span
-                title="Pick a valid start and end date"
+                title={reportDisabledHint}
                 className="btn btn-secondary btn-sm"
                 style={{ opacity: 0.5, cursor: 'not-allowed', whiteSpace: 'nowrap', display: 'inline-block' }}
               >
                 Download PDF report →
+              </span>
+            )}
+            {isPageReport && !pageReportReady && (
+              <span style={{ fontSize: 11.5, color: 'var(--warn)', fontWeight: 600 }}>
+                Set a From date in the page filter first
               </span>
             )}
           </div>
