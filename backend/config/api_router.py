@@ -12,6 +12,7 @@ from reptruly.reviews.api.controllers import (
     ReviewsAPI,
 )
 from reptruly.reviews.api.rate_history_controller import RateHistoryAPI
+from reptruly.reviews.api.rate_outlook_controller import RateOutlookAPI
 from reptruly.public_api.controllers import KeysAPI, PublicAPI
 from reptruly.users.api.controllers import AuthAPI
 
@@ -25,6 +26,7 @@ api.register_controllers(
     PropertiesAPI,
     RatesAPI,
     RateHistoryAPI,
+    RateOutlookAPI,
     BadgeAPI,
     CalendarAPI,
     SyncAPI,

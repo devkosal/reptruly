@@ -73,6 +73,25 @@ function looksLikeRental(name: string): boolean {
 
 type SortKey = 'rate' | 'distance' | 'stars' | 'review' | 'vs'
 
+// ---------- Multi-night outlook ----------
+
+interface OutlookNight {
+  checkin: string
+  user_rate: number | null
+  market_median: number | null
+  market_avg: number | null
+  comp_count: number
+  currency: string
+  source: 'live' | 'snapshot' | null
+  as_of: string | null
+}
+
+interface OutlookResponse {
+  nights: number
+  entries: OutlookNight[]
+  missing: number
+}
+
 // ---------- Rate history (daily snapshots from the rates sync) ----------
 
 interface RateSnapshotRow {
@@ -534,6 +553,12 @@ export default function Rates() {
   const [rateFilter, setRateFilter] = useState<Set<RateBucket> | null>(null)
   // Hide condos / private rooms / vacation rentals from the comp set by default.
   const [hotelsOnly, setHotelsOnly] = useState(true)
+  // Multi-night outlook: your rate vs the market for the next 14 nights.
+  const [outlook, setOutlook] = useState<OutlookNight[] | null>(null)
+  const [outlookMissing, setOutlookMissing] = useState(0)
+  const [scanning, setScanning] = useState(false)
+  const [scanProgress, setScanProgress] = useState('')
+  const [outlookError, setOutlookError] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('rate')
   const [sortDir, setSortDir] = useState<1 | -1>(1)
 
@@ -623,6 +648,58 @@ export default function Rates() {
     if (selectedProperty) fetchRates(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProperty?.id, checkin, checkout, adults])
+
+  // Multi-night outlook — cached/snapshot data only; the scan button fills gaps.
+  useEffect(() => {
+    if (!selectedProperty) {
+      setOutlook(null)
+      return
+    }
+    let cancelled = false
+    setOutlook(null)
+    setOutlookMissing(0)
+    setOutlookError('')
+    fetch(`/api/rates-outlook/${selectedProperty.id}?adults=${adults}`, { credentials: 'include' })
+      .then(res => (res.ok ? (res.json() as Promise<OutlookResponse>) : null))
+      .then(json => {
+        if (!cancelled && json) {
+          setOutlook(json.entries)
+          setOutlookMissing(json.missing)
+        }
+      })
+      .catch(() => { /* outlook simply stays hidden */ })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedProperty?.id, adults])
+
+  // Fetch missing nights in small batches until the outlook is complete.
+  async function scanOutlook() {
+    if (!selectedProperty || scanning) return
+    setScanning(true)
+    setOutlookError('')
+    const total = outlook?.length ?? 14
+    try {
+      let missing = outlookMissing
+      while (missing > 0) {
+        setScanProgress(`Fetching… ${total - missing} of ${total} nights loaded`)
+        const res = await fetch(
+          `/api/rates-outlook/${selectedProperty.id}/scan?adults=${adults}`,
+          { method: 'POST', credentials: 'include' },
+        )
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.message || json.detail || 'Scan failed')
+        setOutlook(json.entries)
+        setOutlookMissing(json.missing)
+        missing = json.missing
+      }
+    } catch (e: any) {
+      setOutlookError(e.message || 'Scan failed')
+    } finally {
+      setScanning(false)
+      setScanProgress('')
+    }
+  }
 
   // Rate history snapshots (written by the daily rates sync)
   useEffect(() => {
@@ -1033,6 +1110,107 @@ export default function Rates() {
           </p>
         </>
       )}
+      {/* 14-night outlook — which upcoming nights are mispriced */}
+      {selectedProperty && !upgradeMsg && outlook && (
+        <div className="card" style={{ marginTop: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div>
+              <div className="section-title" style={{ marginBottom: 2 }}>14-night outlook</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Your rate vs. the market median for each of the next 14 nights — click a night to inspect it above.
+              </div>
+            </div>
+            {outlookMissing > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                {scanning && <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{scanProgress}</span>}
+                <button className="btn btn-secondary btn-sm" onClick={scanOutlook} disabled={scanning}>
+                  {scanning ? 'Scanning…' : `Fetch ${outlookMissing} missing night${outlookMissing === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            )}
+          </div>
+          {outlookError && <div className="error-msg" style={{ marginBottom: 10 }}>{outlookError}</div>}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
+            {outlook.map(n => {
+              const dt = new Date(n.checkin + 'T00:00:00')
+              const market = n.market_median ?? n.market_avg
+              const deltaPct = n.user_rate !== null && market
+                ? ((n.user_rate - market) / market) * 100
+                : null
+              const deltaColors = deltaPct === null
+                ? { bg: 'var(--surface-2)', fg: 'var(--text-faint)' }
+                : deltaPct < -10
+                  ? { bg: 'var(--good-soft)', fg: 'var(--good)' }
+                  : deltaPct > 10
+                    ? { bg: 'var(--bad-soft)', fg: 'var(--bad)' }
+                    : { bg: 'var(--accent-soft)', fg: 'var(--accent)' }
+              const isSelected = n.checkin === checkin
+              const hasData = n.source !== null
+              const tooltip = hasData
+                ? `${n.checkin} — you ${formatPrice(n.user_rate, n.currency)} · market ${formatPrice(market, n.currency)} (${n.comp_count} comps${n.source === 'snapshot' ? `, snapshot from ${n.as_of}` : ''})`
+                : `${n.checkin} — no data yet; use "Fetch missing nights"`
+              return (
+                <button
+                  key={n.checkin}
+                  onClick={() => {
+                    setCheckin(n.checkin)
+                    setCheckout(defaultCheckout(n.checkin))
+                  }}
+                  title={tooltip}
+                  style={{
+                    border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
+                    boxShadow: isSelected ? '0 0 0 2px rgba(79,70,229,0.15)' : 'none',
+                    borderRadius: 10,
+                    background: hasData ? 'var(--surface)' : 'var(--surface-2)',
+                    padding: '8px 6px',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    textAlign: 'center',
+                    minWidth: 0,
+                    transition: 'border-color 0.15s, box-shadow 0.15s',
+                  }}
+                >
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {dt.toLocaleDateString(undefined, { weekday: 'short' })}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginTop: 1 }}>
+                    {dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </div>
+                  {hasData ? (
+                    <>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginTop: 5, fontVariantNumeric: 'tabular-nums' }}>
+                        {formatPrice(n.user_rate, n.currency)}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                        mkt {formatPrice(market, n.currency)}
+                      </div>
+                      <div style={{
+                        display: 'inline-block', marginTop: 4, padding: '1px 7px', borderRadius: 999,
+                        fontSize: 10, fontWeight: 700, background: deltaColors.bg, color: deltaColors.fg,
+                        fontVariantNumeric: 'tabular-nums',
+                      }}>
+                        {deltaPct === null ? '—' : `${deltaPct > 0 ? '+' : ''}${deltaPct.toFixed(0)}%`}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 10, marginBottom: 8 }}>
+                      No data
+                    </div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 10, lineHeight: 1.5 }}>
+            Green = you're priced 10%+ below the market for that night (room to raise) · red = 10%+ above.
+            Data comes from today's cached lookups and daily snapshots; fetching missing nights pulls live
+            from Booking.com (a few seconds per night, then cached for 24h).
+          </div>
+        </div>
+      )}
+
       {selectedProperty && !upgradeMsg && (
         <div className="card" style={{ marginTop: 18 }}>
           <div className="section-title">Rate history</div>
