@@ -28,7 +28,10 @@ def _cache_rates(prop, checkin, user_rate=120.0, comps=(100.0, 150.0, 200.0), ad
     key = _rates_cache_key(
         prop.id, checkin.isoformat(), (checkin + timedelta(days=1)).isoformat(), adults
     )
-    competitors = [{"price": p, "is_user_property": False} for p in comps]
+    competitors = [
+        {"hotel_name": f"Comp Hotel {i}", "price": p, "is_user_property": False}
+        for i, p in enumerate(comps)
+    ]
     competitors.append({"price": user_rate, "is_user_property": True})
     cache.set(key, {
         "user_rate": user_rate,
@@ -78,6 +81,9 @@ class TestBuildOutlook:
         assert e["market_median"] == 150.0
         assert e["market_avg"] == 150.0
         assert e["comp_count"] == 3
+        # Live entries expose the per-comp prices so the client can re-filter.
+        assert sorted(c["price"] for c in e["comps"]) == [100.0, 150.0, 200.0]
+        assert all(c["name"].startswith("Comp Hotel") for c in e["comps"])
 
     def test_snapshot_fallback_uses_newest_snapshot(self):
         prop = _prop(UserFactory())

@@ -26,6 +26,11 @@ OUTLOOK_NIGHTS = 14
 SCAN_BATCH_LIMIT = 4
 
 
+class OutlookCompOut(Schema):
+    name: str = ""
+    price: float
+
+
 class OutlookNightOut(Schema):
     checkin: date
     user_rate: Optional[float] = None
@@ -36,6 +41,9 @@ class OutlookNightOut(Schema):
     # 'live' (24h rates cache), 'snapshot' (daily sync), or null (no data yet)
     source: Optional[str] = None
     as_of: Optional[date] = None
+    # Per-comp prices (live entries only) so the client can recompute the
+    # median under its own comp-set filters (e.g. "hotels only").
+    comps: list[OutlookCompOut] = []
 
 
 class RateOutlookOut(Schema):
@@ -55,19 +63,22 @@ def _median(nums: list[float]) -> Optional[float]:
 
 
 def _entry_from_rates(checkin: date, rates: dict) -> dict:
-    comp = [
-        c["price"] for c in rates.get("competitors", [])
+    comps = [
+        {"name": c.get("hotel_name") or "", "price": c["price"]}
+        for c in rates.get("competitors", [])
         if c.get("price") is not None and not c.get("is_user_property")
     ]
+    prices = [c["price"] for c in comps]
     return {
         "checkin": checkin,
         "user_rate": rates.get("user_rate"),
-        "market_median": _median(comp),
-        "market_avg": round(sum(comp) / len(comp), 2) if comp else None,
-        "comp_count": len(comp),
+        "market_median": _median(prices),
+        "market_avg": round(sum(prices) / len(prices), 2) if prices else None,
+        "comp_count": len(prices),
         "currency": rates.get("currency") or "USD",
         "source": "live",
         "as_of": date.today(),
+        "comps": comps,
     }
 
 

@@ -84,6 +84,9 @@ interface OutlookNight {
   currency: string
   source: 'live' | 'snapshot' | null
   as_of: string | null
+  // Per-comp prices (live entries only) — lets the UI recompute the median
+  // under the same "Hotels only" filter as the comp table.
+  comps: { name: string; price: number }[]
 }
 
 interface OutlookResponse {
@@ -1134,7 +1137,16 @@ export default function Rates() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 6 }}>
             {outlook.map(n => {
               const dt = new Date(n.checkin + 'T00:00:00')
-              const market = n.market_median ?? n.market_avg
+              // Live nights carry per-comp prices, so the median honors the
+              // same "Hotels only" toggle as the comp table above. Snapshot
+              // nights only store an unfiltered average — use it as-is.
+              const nightComps = n.comps?.length
+                ? (hotelsOnly ? n.comps.filter(c => !looksLikeRental(c.name)) : n.comps)
+                : null
+              const market = nightComps?.length
+                ? median(nightComps.map(c => c.price))
+                : (n.market_median ?? n.market_avg)
+              const marketCount = nightComps?.length ?? n.comp_count
               const deltaPct = n.user_rate !== null && market
                 ? ((n.user_rate - market) / market) * 100
                 : null
@@ -1148,7 +1160,7 @@ export default function Rates() {
               const isSelected = n.checkin === checkin
               const hasData = n.source !== null
               const tooltip = hasData
-                ? `${n.checkin} — you ${formatPrice(n.user_rate, n.currency)} · market ${formatPrice(market, n.currency)} (${n.comp_count} comps${n.source === 'snapshot' ? `, snapshot from ${n.as_of}` : ''})`
+                ? `${n.checkin} — you ${formatPrice(n.user_rate, n.currency)} · market ${formatPrice(market, n.currency)} (${marketCount} comps${n.source === 'snapshot' ? `, snapshot from ${n.as_of}, unfiltered` : ''})`
                 : `${n.checkin} — no data yet; use "Fetch missing nights"`
               return (
                 <button
@@ -1205,6 +1217,7 @@ export default function Rates() {
 
           <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 10, lineHeight: 1.5 }}>
             Green = you're priced 10%+ below the market for that night (room to raise) · red = 10%+ above.
+            The market median follows the "Hotels only" filter above (snapshot-sourced nights are unfiltered).
             Data comes from today's cached lookups and daily snapshots; fetching missing nights pulls live
             from Booking.com (a few seconds per night, then cached for 24h).
           </div>
