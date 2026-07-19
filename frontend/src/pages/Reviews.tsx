@@ -31,6 +31,13 @@ interface ReviewListResponse {
   ota_counts?: Record<string, number>
 }
 
+interface TriageSummary {
+  unanswered_total: number
+  negative_unanswered: number
+  recent_unanswered: number
+  positive_unthanked: number
+}
+
 const PAGE_LIMIT = 20
 
 // Fixed auto-tag taxonomy — keep in sync with backend/reptruly/reviews/tagging.py
@@ -152,6 +159,12 @@ export default function Reviews() {
   const [maxScore, setMaxScore] = useState(() => searchParams.get('max_score') ?? '')
   const [fromDate, setFromDate] = useState(() => searchParams.get('from_date') ?? '')
   const [toDate, setToDate] = useState(() => searchParams.get('to_date') ?? '')
+  const [ordering, setOrdering] = useState(() => searchParams.get('ordering') ?? 'newest')
+
+  // Triage preset counts (negative unanswered, positive to thank, …).
+  const [triage, setTriage] = useState<TriageSummary | null>(null)
+  // Cards whose full review text is expanded in place.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   // Re-sync state when the URL changes (e.g. user clicks another drill-down link from Analytics).
   useEffect(() => {
@@ -167,6 +180,50 @@ export default function Reviews() {
 
   // Detail modal
   const [selectedReview, setSelectedReview] = useState<Review | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const qs = selectedProperty
+      ? `?property_name=${encodeURIComponent(selectedProperty.property_name)}`
+      : ''
+    fetch(`/api/reviews/triage/summary${qs}`, { credentials: 'include' })
+      .then(res => (res.ok ? (res.json() as Promise<TriageSummary>) : null))
+      .then(json => { if (!cancelled && json) setTriage(json) })
+      .catch(() => { /* chips simply stay hidden */ })
+    return () => { cancelled = true }
+  }, [selectedProperty])
+
+  function toggleExpanded(id: string) {
+    setExpandedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // One-click triage presets. Clicking the active preset resets to the default view.
+  type Preset = 'negative' | 'oldest' | 'positive'
+  const presetActive: Record<Preset, boolean> = {
+    negative: replyFilter === 'false' && maxScore === '6' && !minScore && ordering === 'lowest',
+    oldest: replyFilter === 'false' && !minScore && !maxScore && ordering === 'oldest',
+    positive: replyFilter === 'false' && minScore === '9' && !maxScore,
+  }
+
+  function applyPreset(preset: Preset) {
+    setSearch(''); setOtaFilter(''); setTagFilter(''); setFromDate(''); setToDate('')
+    if (presetActive[preset]) {
+      setReplyFilter(''); setMinScore(''); setMaxScore(''); setOrdering('newest')
+      return
+    }
+    if (preset === 'negative') {
+      setReplyFilter('false'); setMinScore(''); setMaxScore('6'); setOrdering('lowest')
+    } else if (preset === 'oldest') {
+      setReplyFilter('false'); setMinScore(''); setMaxScore(''); setOrdering('oldest')
+    } else {
+      setReplyFilter('false'); setMinScore('9'); setMaxScore(''); setOrdering('newest')
+    }
+  }
 
   // AI draft reply state — only one open at a time.
   const [aiDraftFor, setAiDraftFor] = useState<string | null>(null)
@@ -286,6 +343,7 @@ export default function Reviews() {
     // Only send dates that fully parse as YYYY-MM-DD — stops mid-typing partials reaching the server.
     if (/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) params.set('from_date', fromDate)
     if (/^\d{4}-\d{2}-\d{2}$/.test(toDate)) params.set('to_date', toDate)
+    if (ordering !== 'newest') params.set('ordering', ordering)
 
     try {
       const res = await fetch(`/api/reviews?${params}`, { credentials: 'include' })
@@ -305,10 +363,10 @@ export default function Reviews() {
   // Use validated date params in the dependency array so partial date strings don't trigger refetches.
   const fromDateParam = /^\d{4}-\d{2}-\d{2}$/.test(fromDate) ? fromDate : ''
   const toDateParam = /^\d{4}-\d{2}-\d{2}$/.test(toDate) ? toDate : ''
-  useEffect(() => { fetchReviews(1) }, [selectedProperty, search, otaFilter, replyFilter, tagFilter, minScore, maxScore, fromDateParam, toDateParam])
+  useEffect(() => { fetchReviews(1) }, [selectedProperty, search, otaFilter, replyFilter, tagFilter, minScore, maxScore, fromDateParam, toDateParam, ordering])
 
   const totalPages = Math.ceil(total / PAGE_LIMIT)
-  const hasActiveFilters = !!(search || otaFilter || replyFilter || tagFilter || minScore || maxScore || fromDate || toDate)
+  const hasActiveFilters = !!(search || otaFilter || replyFilter || tagFilter || minScore || maxScore || fromDate || toDate || ordering !== 'newest')
 
   // CSV download honoring the current filters (same params as fetchReviews, minus paging).
   const exportParams = new URLSearchParams()
@@ -341,6 +399,54 @@ export default function Reviews() {
         </a>
       }
     >
+      {/* Triage presets — one click to the pile that needs attention */}
+      {triage && triage.unanswered_total > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>
+            Triage
+          </span>
+          <button
+            type="button"
+            className={presetActive.negative ? 'chip chip-bad' : 'chip'}
+            style={{ cursor: 'pointer', fontFamily: 'inherit' }}
+            onClick={() => applyPreset('negative')}
+            title="Unanswered reviews scoring 6 or below, worst first"
+          >
+            🔥 Negative &amp; unanswered
+            <span style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
+              {triage.negative_unanswered.toLocaleString()}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={presetActive.oldest ? 'chip chip-accent' : 'chip'}
+            style={{ cursor: 'pointer', fontFamily: 'inherit' }}
+            onClick={() => applyPreset('oldest')}
+            title="Every unanswered review, most overdue first"
+          >
+            🕐 Oldest unanswered
+            <span style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
+              {triage.unanswered_total.toLocaleString()}
+            </span>
+          </button>
+          <button
+            type="button"
+            className={presetActive.positive ? 'chip chip-good' : 'chip'}
+            style={{ cursor: 'pointer', fontFamily: 'inherit' }}
+            onClick={() => applyPreset('positive')}
+            title="Unanswered reviews scoring 9+, newest first — quick thank-yous"
+          >
+            🙂 Positive to thank
+            <span style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>
+              {triage.positive_unthanked.toLocaleString()}
+            </span>
+          </button>
+          <span style={{ fontSize: 12, color: 'var(--text-faint)', marginLeft: 'auto' }}>
+            {triage.unanswered_total.toLocaleString()} awaiting reply · {triage.recent_unanswered.toLocaleString()} new this week
+          </span>
+        </div>
+      )}
+
       {/* Filters — per-OTA count chips + all filter controls in one row */}
       <div className="filters">
         {/* Per-OTA count chips — one tap to see e.g. Google reviews that would otherwise
@@ -397,6 +503,18 @@ export default function Reviews() {
           </button>
         </div>
 
+        <select
+          className="filter-select"
+          value={ordering}
+          onChange={e => setOrdering(e.target.value)}
+          title="Sort order"
+        >
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="lowest">Lowest score first</option>
+          <option value="highest">Highest score first</option>
+        </select>
+
         <input
           className="filter-input" style={{ width: 100 }}
           type="number" placeholder="Min score" min="0" max="10" step="0.5"
@@ -436,6 +554,7 @@ export default function Reviews() {
           onClick={() => {
             setSearch(''); setOtaFilter(''); setReplyFilter(''); setTagFilter('')
             setMinScore(''); setMaxScore(''); setFromDate(''); setToDate('')
+            setOrdering('newest')
             // Also drop URL params so the URL doesn't lie about the active filter set.
             setSearchParams({})
           }}
@@ -459,14 +578,14 @@ export default function Reviews() {
             </p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {reviews.map(r => (
               <div
                 key={r.id}
                 onClick={() => setSelectedReview(r)}
                 className="card"
                 style={{
-                  padding: '18px 20px',
+                  padding: '12px 16px',
                   cursor: 'pointer',
                   transition: 'transform 0.12s, box-shadow 0.12s, border-color 0.12s',
                   position: 'relative',
@@ -482,7 +601,7 @@ export default function Reviews() {
                   e.currentTarget.style.borderColor = ''
                 }}
               >
-                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 16, alignItems: 'start' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 12, alignItems: 'start' }}>
                   {/* Score column */}
                   <div className={scoreBadgeClass(r.overall_score)} style={r.overall_score === null ? noScoreStyle : undefined}>
                     {r.overall_score !== null ? r.overall_score.toFixed(1) : '—'}
@@ -490,7 +609,7 @@ export default function Reviews() {
 
                   {/* Content column */}
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                       <span className={otaBadgeClass(r.ota_name)}>{r.ota_name || 'Other'}</span>
                       {r.property_name && (
                         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{r.property_name}</span>
@@ -509,67 +628,82 @@ export default function Reviews() {
                       <span style={{ fontSize: 12, color: 'var(--text-faint)', marginLeft: 'auto' }}>
                         {formatDate(r.reviewed_at)}
                       </span>
+                      {r.has_reply ? (
+                        <span className="chip chip-good" style={{ fontSize: 11, padding: '2px 8px' }}>✓ Replied</span>
+                      ) : (
+                        <span className="chip chip-warn" style={{ fontSize: 11, padding: '2px 8px' }}>Pending</span>
+                      )}
                     </div>
 
                     <div style={{
-                      fontSize: 14, lineHeight: 1.55, color: 'var(--text)',
-                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
+                      fontSize: 14, lineHeight: 1.5, color: 'var(--text)',
+                      ...(expandedIds.has(r.id) ? {} : {
+                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const,
+                        overflow: 'hidden',
+                      }),
                     }}>
                       {r.content || <em style={{ color: 'var(--text-faint)' }}>No review text</em>}
                     </div>
 
-                    {r.reply && (
+                    {r.reply && expandedIds.has(r.id) && (
                       <div style={{
-                        marginTop: 10, padding: '8px 12px',
+                        marginTop: 8, padding: '8px 12px',
                         background: 'var(--surface-2)',
                         borderLeft: '3px solid var(--accent)',
                         borderRadius: 6, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.5,
                       }}>
-                        ↳ {r.reply.length > 140 ? r.reply.slice(0, 140) + '…' : r.reply}
+                        ↳ {r.reply}
                       </div>
                     )}
-                  </div>
 
-                  {/* Status / action column */}
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, minWidth: 110 }}>
-                    {r.has_reply ? (
-                      <span className="chip chip-good">✓ Replied</span>
-                    ) : (
-                      <span className="chip chip-warn">Pending</span>
-                    )}
-                    {!r.has_reply && r.draft_reply && (
-                      <span className="chip chip-accent" style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap' }}>
-                        Draft ready
-                      </span>
-                    )}
-                    {!r.has_reply && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={e => { e.stopPropagation(); openAIDraft(r) }}
-                        disabled={aiDraftFor === r.id && aiDraftLoading}
-                        style={{ whiteSpace: 'nowrap' }}
-                      >
-                        AI draft
-                      </button>
-                    )}
-                    {!r.has_reply && r.property_id && (() => {
-                      const href = replyUrlForReview(r.ota_name, r.property_id)
-                      return href ? (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          title={`Opens the ${r.ota_name} partner extranet in a new tab`}
-                          className="btn btn-primary btn-sm"
-                          style={{ textDecoration: 'none', whiteSpace: 'nowrap' }}
+                    {/* Compact action row */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                      {(r.content.length > 160 || !!r.reply) && (
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); toggleExpanded(r.id) }}
+                          style={{
+                            background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                            fontSize: 12, fontWeight: 600, color: 'var(--accent)', fontFamily: 'inherit',
+                          }}
                         >
-                          {replyButtonLabel(r.ota_name)}
-                        </a>
-                      ) : null
-                    })()}
+                          {expandedIds.has(r.id) ? 'Show less' : 'Show more'}
+                        </button>
+                      )}
+                      <span style={{ flex: 1 }} />
+                      {!r.has_reply && r.draft_reply && (
+                        <span className="chip chip-accent" style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap' }}>
+                          Draft ready
+                        </span>
+                      )}
+                      {!r.has_reply && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={e => { e.stopPropagation(); openAIDraft(r) }}
+                          disabled={aiDraftFor === r.id && aiDraftLoading}
+                          style={{ whiteSpace: 'nowrap', padding: '5px 12px' }}
+                        >
+                          AI draft
+                        </button>
+                      )}
+                      {!r.has_reply && r.property_id && (() => {
+                        const href = replyUrlForReview(r.ota_name, r.property_id)
+                        return href ? (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            title={`Opens the ${r.ota_name} partner extranet in a new tab`}
+                            className="btn btn-primary btn-sm"
+                            style={{ textDecoration: 'none', whiteSpace: 'nowrap', padding: '5px 12px' }}
+                          >
+                            {replyButtonLabel(r.ota_name)}
+                          </a>
+                        ) : null
+                      })()}
+                    </div>
                   </div>
                 </div>
 

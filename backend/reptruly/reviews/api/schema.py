@@ -37,6 +37,18 @@ class ReviewListOut(Schema):
     ota_counts: dict[str, int] = {}
 
 
+class TriageSummaryOut(Schema):
+    """Counts behind the inbox triage presets."""
+
+    unanswered_total: int
+    # Unanswered with score <= 6 — the angry-guest pile.
+    negative_unanswered: int
+    # Unanswered from the last 7 days.
+    recent_unanswered: int
+    # Unanswered with score >= 9 — quick wins to thank.
+    positive_unthanked: int
+
+
 class ReplyIn(Schema):
     reply: str
 

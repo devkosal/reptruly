@@ -4,7 +4,7 @@ from typing import Optional
 from uuid import UUID
 
 from django.core.cache import cache
-from django.db.models import Avg, Count, Q
+from django.db.models import Avg, Count, F, Q
 from django.utils import timezone
 from ninja.errors import HttpError
 from ninja.responses import codes_4xx, codes_5xx
@@ -44,6 +44,7 @@ from .schema import (
     ReviewOut,
     TopicScoresOut,
     TrendsOut,
+    TriageSummaryOut,
 )
 
 logger = get_logger()
@@ -131,8 +132,13 @@ class ReviewsAPI:
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
         tag: Optional[str] = None,
+        ordering: str = "newest",
     ):
-        """List reviews stored locally, with optional filters."""
+        """List reviews stored locally, with optional filters.
+
+        ordering: newest (default) | oldest | lowest | highest — score orders
+        put unscored reviews last and break ties newest-first.
+        """
         qs = self._apply_filters(
             _user_review_qs(request),
             search=search,
@@ -146,11 +152,22 @@ class ReviewsAPI:
             tag=tag,
         )
 
+        if ordering == "oldest":
+            qs = qs.order_by("reviewed_at", "created_at")
+        elif ordering == "lowest":
+            qs = qs.order_by(F("overall_score").asc(nulls_last=True), "-reviewed_at")
+        elif ordering == "highest":
+            qs = qs.order_by(F("overall_score").desc(nulls_last=True), "-reviewed_at")
+        else:
+            qs = qs.order_by("-reviewed_at", "-created_at")
+
         # Per-OTA counts reflect every filter EXCEPT the OTA selection, so chips stay
         # clickable and show how many reviews each source has in the current scope.
+        # order_by() clears the list ordering — its fields would otherwise join the
+        # GROUP BY and splinter the counts into one row per review.
         ota_counts = {
             row["ota_name"]: row["c"]
-            for row in qs.values("ota_name").annotate(c=Count("id"))
+            for row in qs.order_by().values("ota_name").annotate(c=Count("id"))
             if row["ota_name"]
         }
 
@@ -167,6 +184,21 @@ class ReviewsAPI:
             "page": page,
             "limit": limit,
             "ota_counts": ota_counts,
+        }
+
+    @http_get("/triage/summary", response={200: TriageSummaryOut})
+    def triage_summary(self, request, property_name: Optional[str] = None):
+        """Counts behind the inbox triage preset chips, scoped to one property or all."""
+        qs = _user_review_qs(request)
+        if property_name:
+            qs = qs.filter(property_name=property_name)
+        unanswered = qs.filter(has_reply=False)
+        week_ago = timezone.now() - timedelta(days=7)
+        return 200, {
+            "unanswered_total": unanswered.count(),
+            "negative_unanswered": unanswered.filter(overall_score__lte=6).count(),
+            "recent_unanswered": unanswered.filter(reviewed_at__gte=week_ago).count(),
+            "positive_unthanked": unanswered.filter(overall_score__gte=9).count(),
         }
 
     @http_get("/export/csv")
