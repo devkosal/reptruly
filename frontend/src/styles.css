@@ -223,6 +223,25 @@ body {
   margin-top: 2px;
 }
 
+/* Analytics time-controls toolbar: page filter on the left, PDF report
+   export on the right, one card so the two time controls read together. */
+.analytics-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+}
+
+.analytics-toolbar > div + div {
+  border-left: 1px solid var(--border);
+}
+
+@media (max-width: 1150px) {
+  .analytics-toolbar { grid-template-columns: 1fr; }
+  .analytics-toolbar > div + div {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
 /* Filters bar */
 .filters {
   display: flex;

@@ -648,124 +648,127 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
 
   return (
     <>
-      {/* Report CTA — generate a PDF spanning the selected period. */}
-      <div className="card" style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-        marginBottom: 16, flexWrap: 'wrap',
-      }}>
-        <div>
+      {/* Time controls — one card, two clearly-scoped halves: the left filters
+          what THIS PAGE shows; the right exports a PDF report for a period. */}
+      <div className="card analytics-toolbar" style={{ padding: 0, marginBottom: 18, overflow: 'hidden' }}>
+        {/* Left: page date-range filter */}
+        <div style={{ padding: '16px 20px' }}>
+          <div className="section-title" style={{ marginBottom: 2 }}>
+            View on this page
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Filters the KPIs, charts and AI summary below.{' '}
+            {loading && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Refreshing…</span>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>From</label>
+              <input
+                type="date"
+                className="filter-input"
+                value={fromDate}
+                max={toDate || undefined}
+                onChange={e => setFromDate(e.target.value)}
+                style={{ padding: '7px 10px', fontSize: 13 }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>To</label>
+              <input
+                type="date"
+                className="filter-input"
+                value={toDate}
+                min={fromDate || undefined}
+                onChange={e => setToDate(e.target.value)}
+                style={{ padding: '7px 10px', fontSize: 13 }}
+              />
+            </div>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => { setFromDate(''); setToDate('') }}
+              disabled={!hasDateFilter}
+            >
+              Clear
+            </button>
+            <span style={{ fontSize: 11.5, color: 'var(--text-faint)', paddingBottom: 8 }}>
+              {hasDateFilter ? 'Showing the selected range' : 'Showing all time'}
+            </span>
+          </div>
+        </div>
+
+        {/* Right: PDF report export */}
+        <div style={{ padding: '16px 20px', background: 'var(--surface-2)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-            <div className="section-title" style={{ marginBottom: 0 }}>Analytics report</div>
+            <div className="section-title" style={{ marginBottom: 0 }}>Download a PDF report</div>
             {aiLocked && (
               <span className="chip chip-accent" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 AI sections: Pro
               </span>
             )}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
             {aiLocked
-              ? <>Property name, per-OTA stats, and trends — for the {reportPeriodLabel.toLowerCase()}. Downloads as PDF. Upgrade to Pro to add AI insights and topic scores.</>
-              : <>Property name, per-OTA stats, AI insights, and topic scores — for the {reportPeriodLabel.toLowerCase()}. Downloads as PDF.</>}
+              ? <>A shareable PDF for <strong>{propertyName ?? 'all properties'}</strong> covering the {reportPeriodLabel.toLowerCase()}: review volumes, average scores and trends per OTA. Upgrade to Pro to add AI insights and topic scores.</>
+              : <>A shareable PDF for <strong>{propertyName ?? 'all properties'}</strong> covering the {reportPeriodLabel.toLowerCase()}: review volumes, average scores and trends per OTA, plus AI insights and topic scores.</>}
           </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <label htmlFor="report-period" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Period
-          </label>
-          <select
-            id="report-period"
-            className="filter-select"
-            value={reportDays}
-            onChange={e => setReportDays(e.target.value)}
-            style={{ fontSize: 13, fontWeight: 600, padding: '7px 10px', cursor: 'pointer' }}
-          >
-            {REPORT_PERIODS.map(p => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
-          {isCustomReport && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <input
-                type="date"
-                aria-label="Report start date"
-                className="filter-input"
-                value={reportFrom}
-                max={reportTo || undefined}
-                onChange={e => setReportFrom(e.target.value)}
-                style={{ padding: '7px 9px', fontSize: 12 }}
-              />
-              <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>→</span>
-              <input
-                type="date"
-                aria-label="Report end date"
-                className="filter-input"
-                value={reportTo}
-                min={reportFrom || undefined}
-                onChange={e => setReportTo(e.target.value)}
-                style={{ padding: '7px 9px', fontSize: 12 }}
-              />
-            </div>
-          )}
-          {reportReady ? (
-            <a
-              href={reportHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-primary btn-sm"
-              style={{ textDecoration: 'none', whiteSpace: 'nowrap', display: 'inline-block' }}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <label htmlFor="report-period" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Period
+            </label>
+            <select
+              id="report-period"
+              className="filter-select"
+              value={reportDays}
+              onChange={e => setReportDays(e.target.value)}
+              style={{ fontSize: 13, fontWeight: 600, padding: '7px 10px', cursor: 'pointer' }}
             >
-              Generate report →
-            </a>
-          ) : (
-            <span
-              title="Pick a valid start and end date"
-              className="btn btn-secondary btn-sm"
-              style={{ opacity: 0.5, cursor: 'not-allowed', whiteSpace: 'nowrap', display: 'inline-block' }}
-            >
-              Generate report →
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Date-range filter — applies to all analytics on this page */}
-      <div className="filters">
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          Date range
-        </span>
-        <div>
-          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>From</label>
-          <input
-            type="date"
-            className="filter-input"
-            value={fromDate}
-            max={toDate || undefined}
-            onChange={e => setFromDate(e.target.value)}
-            style={{ padding: '7px 10px', fontSize: 13 }}
-          />
-        </div>
-        <div>
-          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>To</label>
-          <input
-            type="date"
-            className="filter-input"
-            value={toDate}
-            min={fromDate || undefined}
-            onChange={e => setToDate(e.target.value)}
-            style={{ padding: '7px 10px', fontSize: 13 }}
-          />
-        </div>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() => { setFromDate(''); setToDate('') }}
-          disabled={!hasDateFilter}
-          style={{ alignSelf: 'flex-end' }}
-        >
-          Clear
-        </button>
-        <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          {loading && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Refreshing…</span>}
-          <span>Filters apply to KPIs, charts and AI summary</span>
+              {REPORT_PERIODS.map(p => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+            {isCustomReport && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <input
+                  type="date"
+                  aria-label="Report start date"
+                  className="filter-input"
+                  value={reportFrom}
+                  max={reportTo || undefined}
+                  onChange={e => setReportFrom(e.target.value)}
+                  style={{ padding: '7px 9px', fontSize: 12 }}
+                />
+                <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>→</span>
+                <input
+                  type="date"
+                  aria-label="Report end date"
+                  className="filter-input"
+                  value={reportTo}
+                  min={reportFrom || undefined}
+                  onChange={e => setReportTo(e.target.value)}
+                  style={{ padding: '7px 9px', fontSize: 12 }}
+                />
+              </div>
+            )}
+            {reportReady ? (
+              <a
+                href={reportHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-primary btn-sm"
+                style={{ textDecoration: 'none', whiteSpace: 'nowrap', display: 'inline-block' }}
+              >
+                Download PDF report →
+              </a>
+            ) : (
+              <span
+                title="Pick a valid start and end date"
+                className="btn btn-secondary btn-sm"
+                style={{ opacity: 0.5, cursor: 'not-allowed', whiteSpace: 'nowrap', display: 'inline-block' }}
+              >
+                Download PDF report →
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
