@@ -30,15 +30,7 @@ interface SettingsState {
     tone: 'professional' | 'warm' | 'concise' | 'playful'
     language: string
     auto_suggest: boolean
-    auto_send_5_star: boolean
     signature: string
-  }
-  workspace: {
-    currency: string
-    timezone: string
-    date_format: '24h' | '12h'
-    sync_frequency: 'realtime' | 'hourly' | '6h' | 'daily'
-    compact_density: boolean
   }
 }
 
@@ -58,50 +50,22 @@ const DEFAULT_SETTINGS: SettingsState = {
     tone: 'warm',
     language: 'en',
     auto_suggest: true,
-    auto_send_5_star: false,
     signature: '',
-  },
-  workspace: {
-    currency: 'USD',
-    timezone: 'America/New_York',
-    date_format: '12h',
-    sync_frequency: 'daily',
-    compact_density: false,
   },
 }
 
 const STORAGE_KEY = 'reptruly_settings'
 
-const CURRENCIES = [
-  { code: 'USD', label: 'USD — US Dollar' },
-  { code: 'EUR', label: 'EUR — Euro' },
-  { code: 'GBP', label: 'GBP — British Pound' },
-  { code: 'INR', label: 'INR — Indian Rupee' },
-  { code: 'AUD', label: 'AUD — Australian Dollar' },
-  { code: 'CAD', label: 'CAD — Canadian Dollar' },
-  { code: 'JPY', label: 'JPY — Japanese Yen' },
-  { code: 'AED', label: 'AED — UAE Dirham' },
-  { code: 'CHF', label: 'CHF — Swiss Franc' },
-  { code: 'SGD', label: 'SGD — Singapore Dollar' },
-  { code: 'MXN', label: 'MXN — Mexican Peso' },
-  { code: 'BRL', label: 'BRL — Brazilian Real' },
-  { code: 'THB', label: 'THB — Thai Baht' },
-  { code: 'IDR', label: 'IDR — Indonesian Rupiah' },
-  { code: 'CNY', label: 'CNY — Chinese Yuan' },
-]
-
-const TIMEZONES = [
-  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-  'America/Phoenix', 'America/Anchorage', 'America/Honolulu', 'America/Toronto',
-  'America/Mexico_City', 'America/Sao_Paulo', 'America/Buenos_Aires',
-  'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid', 'Europe/Rome',
-  'Europe/Amsterdam', 'Europe/Athens', 'Europe/Istanbul',
-  'Africa/Cairo', 'Africa/Johannesburg', 'Africa/Lagos', 'Africa/Nairobi',
-  'Asia/Dubai', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Dhaka', 'Asia/Bangkok',
-  'Asia/Singapore', 'Asia/Jakarta', 'Asia/Hong_Kong', 'Asia/Shanghai',
-  'Asia/Tokyo', 'Asia/Seoul', 'Asia/Manila',
-  'Australia/Sydney', 'Australia/Melbourne', 'Australia/Perth',
-  'Pacific/Auckland',
+// Anchor nav — ordered by how often each section is actually visited.
+const SECTION_LINKS = [
+  { id: 'notifications', label: 'Notifications' },
+  { id: 'ai-replies', label: 'AI replies' },
+  { id: 'sync', label: 'Sync' },
+  { id: 'billing', label: 'Billing' },
+  { id: 'badge', label: 'Badge' },
+  { id: 'api-keys', label: 'API keys' },
+  { id: 'security', label: 'Security' },
+  { id: 'data', label: 'Data & privacy' },
 ]
 
 const LANGUAGES = [
@@ -127,17 +91,10 @@ function loadSettings(): SettingsState {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULT_SETTINGS
     const parsed = JSON.parse(raw)
-    const merged: SettingsState = {
+    return {
       notifications: { ...DEFAULT_SETTINGS.notifications, ...(parsed.notifications || {}) },
       reply: { ...DEFAULT_SETTINGS.reply, ...(parsed.reply || {}) },
-      workspace: { ...DEFAULT_SETTINGS.workspace, ...(parsed.workspace || {}) },
     }
-    // Old default of 'hourly' didn't reflect reality — backend syncs daily.
-    // Snap legacy values to 'daily' on read.
-    if (merged.workspace.sync_frequency === 'hourly') {
-      merged.workspace.sync_frequency = 'daily'
-    }
-    return merged
   } catch {
     return DEFAULT_SETTINGS
   }
@@ -341,9 +298,30 @@ export default function Settings() {
     return () => clearTimeout(t)
   }, [settings.reply, replyLoaded])
 
-  const browserTz = useMemo(() => {
-    try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return '' }
+  // Scrollspy for the sticky section nav.
+  const [activeSection, setActiveSection] = useState(SECTION_LINKS[0].id)
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        const visible = entries
+          .filter(e => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+        if (visible[0]) setActiveSection(visible[0].target.id)
+      },
+      // Consider a section "active" while its top is in the upper part of the viewport.
+      { rootMargin: '-120px 0px -55% 0px' },
+    )
+    SECTION_LINKS.forEach(s => {
+      const el = document.getElementById(s.id)
+      if (el) observer.observe(el)
+    })
+    return () => observer.disconnect()
   }, [])
+
+  function jumpTo(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setActiveSection(id)
+  }
 
   function patch<K extends keyof SettingsState>(section: K, partial: Partial<SettingsState[K]>) {
     setSettings(s => ({ ...s, [section]: { ...s[section], ...partial } }))
@@ -361,9 +339,9 @@ export default function Settings() {
 
   return (
     <ThemedPage
-      eyebrow="Workspace"
-      title="Settings"
-      subtitle="Tune your workspace, alerts, and reply assistant."
+      eyebrow="Settings"
+      title="Account & workspace"
+      subtitle="Tune your alerts, reply assistant, syncs, and account."
     >
       {/* Save flash */}
       <div style={{
@@ -379,15 +357,29 @@ export default function Settings() {
         ✓ Saved
       </div>
 
+      {/* Sticky section nav — anchors with scrollspy highlight */}
+      <div style={{
+        position: 'sticky', top: 66, zIndex: 50,
+        background: 'var(--bg)', padding: '6px 0 10px', marginBottom: 8,
+        display: 'flex', gap: 6, flexWrap: 'wrap', maxWidth: 820,
+      }}>
+        {SECTION_LINKS.map(s => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => jumpTo(s.id)}
+            className={activeSection === s.id ? 'chip chip-accent' : 'chip'}
+            style={{ cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
       <div style={{ display: 'grid', gap: 16, maxWidth: 820 }}>
 
-        <BillingSection />
-
-        <BadgeSection />
-
-        <ApiKeysSection />
-
         {/* Notifications */}
+        <div id="notifications" style={{ scrollMarginTop: 130 }}>
         <Section
           title="Notifications"
           description="Choose what we ping you about. You can change these anytime."
@@ -447,8 +439,10 @@ export default function Settings() {
             onChange={v => patch('notifications', { marketing: v })}
           />
         </Section>
+        </div>
 
         {/* Review Reply Assistant */}
+        <div id="ai-replies" style={{ scrollMarginTop: 130 }}>
         <Section
           title="AI Reply Assistant"
           description="How we draft and suggest replies to guest reviews."
@@ -499,14 +493,6 @@ export default function Settings() {
             onChange={v => patch('reply', { auto_suggest: v })}
           />
 
-          <ToggleRow
-            label="Auto-send for 5★ reviews"
-            description="Send a thank-you automatically when a review is 5 stars. Off by default."
-            checked={settings.reply.auto_send_5_star}
-            onChange={v => patch('reply', { auto_send_5_star: v })}
-            badge="Pro"
-          />
-
           <div style={{ padding: '14px 0 4px' }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
               Reply signature
@@ -524,62 +510,32 @@ export default function Settings() {
             />
           </div>
         </Section>
-
-        {/* Workspace */}
-        <Section
-          title="Workspace"
-          description="Region, currency, and how data refreshes."
-        >
-          <SelectRow
-            label="Currency"
-            description="Used for rates, revenue, and competitor comparisons."
-            value={settings.workspace.currency}
-            onChange={v => patch('workspace', { currency: v })}
-            options={CURRENCIES.map(c => ({ value: c.code, label: c.label }))}
-          />
-          <SelectRow
-            label="Timezone"
-            description={browserTz ? `Detected from your browser: ${browserTz}` : 'Used for digests and alert timing.'}
-            value={settings.workspace.timezone}
-            onChange={v => patch('workspace', { timezone: v })}
-            options={TIMEZONES.map(t => ({ value: t, label: t.replace('_', ' ') }))}
-          />
-          <SelectRow
-            label="Time format"
-            value={settings.workspace.date_format}
-            onChange={v => patch('workspace', { date_format: v as '12h' | '24h' })}
-            options={[
-              { value: '12h', label: '12-hour (3:30 PM)' },
-              { value: '24h', label: '24-hour (15:30)' },
-            ]}
-          />
-          <SelectRow
-            label="Sync frequency"
-            description="Reviews, rates, calendar, and analytics all refresh once a day at 03:00 UTC. Faster intervals are on the roadmap."
-            value={settings.workspace.sync_frequency}
-            onChange={v => patch('workspace', { sync_frequency: v as SettingsState['workspace']['sync_frequency'] })}
-            options={[
-              { value: 'daily', label: 'Once a day (current)' },
-              { value: '6h', label: 'Every 6 hours (coming soon)' },
-              { value: 'hourly', label: 'Every hour (coming soon)' },
-              { value: 'realtime', label: 'Real-time (Pro · coming soon)' },
-            ]}
-          />
-          <ToggleRow
-            label="Compact density"
-            description="Tighter spacing in tables and lists. Good for big screens."
-            checked={settings.workspace.compact_density}
-            onChange={v => patch('workspace', { compact_density: v })}
-          />
-        </Section>
+        </div>
 
         {/* Manual sync */}
-        <ManualSyncSection />
+        <div id="sync" style={{ scrollMarginTop: 130 }}>
+          <ManualSyncSection />
+        </div>
+
+        <div id="billing" style={{ scrollMarginTop: 130 }}>
+          <BillingSection />
+        </div>
+
+        <div id="badge" style={{ scrollMarginTop: 130 }}>
+          <BadgeSection />
+        </div>
+
+        <div id="api-keys" style={{ scrollMarginTop: 130 }}>
+          <ApiKeysSection />
+        </div>
 
         {/* Security */}
-        <SecuritySection />
+        <div id="security" style={{ scrollMarginTop: 130 }}>
+          <SecuritySection />
+        </div>
 
         {/* Data & privacy */}
+        <div id="data" style={{ scrollMarginTop: 130 }}>
         <Section
           title="Data & privacy"
           description="Your data is yours. Export it or delete it anytime."
@@ -646,6 +602,7 @@ export default function Settings() {
             </div>
           </div>
         </Section>
+        </div>
       </div>
     </ThemedPage>
   )
