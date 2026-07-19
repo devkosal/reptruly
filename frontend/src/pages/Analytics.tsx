@@ -665,9 +665,11 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
           range the hotel report covers. */}
       <div className="card" style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        gap: 16, marginBottom: 18, flexWrap: 'wrap',
+        gap: 16, marginBottom: 18,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        {/* This group wraps internally; the report CTA keeps its top-right spot
+            even when the custom-range date inputs appear. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
           <label htmlFor="analytics-period" className="section-title" style={{ marginBottom: 0 }}>
             Period
           </label>
@@ -710,7 +712,7 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
           </span>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
           {reportReady ? (
             <a
               href={reportHref}
