@@ -35,6 +35,7 @@ from .schema import (
     AnalyticsOut,
     DraftReplyIn,
     DraftReplyOut,
+    HandledIn,
     PlaceSearchOut,
     PropertyCreateIn,
     PropertyOut,
@@ -94,9 +95,12 @@ class ReviewsAPI:
         from_date=None,
         to_date=None,
         tag=None,
+        handled=None,
     ):
         if search:
             qs = qs.filter(content__icontains=search)
+        if handled is not None:
+            qs = qs.filter(handled_at__isnull=not handled)
         if property_id:
             qs = qs.filter(property_id=property_id)
         if property_name:
@@ -132,12 +136,14 @@ class ReviewsAPI:
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
         tag: Optional[str] = None,
+        handled: Optional[bool] = None,
         ordering: str = "newest",
     ):
         """List reviews stored locally, with optional filters.
 
         ordering: newest (default) | oldest | lowest | highest — score orders
         put unscored reviews last and break ties newest-first.
+        handled filters on the user's "replied on the OTA" mark.
         """
         qs = self._apply_filters(
             _user_review_qs(request),
@@ -150,6 +156,7 @@ class ReviewsAPI:
             from_date=from_date,
             to_date=to_date,
             tag=tag,
+            handled=handled,
         )
 
         if ordering == "oldest":
@@ -188,18 +195,35 @@ class ReviewsAPI:
 
     @http_get("/triage/summary", response={200: TriageSummaryOut})
     def triage_summary(self, request, property_name: Optional[str] = None):
-        """Counts behind the inbox triage preset chips, scoped to one property or all."""
+        """Counts behind the inbox triage preset chips, scoped to one property or all.
+
+        Reviews marked handled count as dealt with, not as unanswered."""
         qs = _user_review_qs(request)
         if property_name:
             qs = qs.filter(property_name=property_name)
-        unanswered = qs.filter(has_reply=False)
+        unanswered = qs.filter(has_reply=False, handled_at__isnull=True)
         week_ago = timezone.now() - timedelta(days=7)
         return 200, {
             "unanswered_total": unanswered.count(),
             "negative_unanswered": unanswered.filter(overall_score__lte=6).count(),
             "recent_unanswered": unanswered.filter(reviewed_at__gte=week_ago).count(),
             "positive_unthanked": unanswered.filter(overall_score__gte=9).count(),
+            "handled_awaiting": qs.filter(has_reply=False, handled_at__isnull=False).count(),
         }
+
+    @http_patch("/{review_id}/handled", response={200: ReviewOut, codes_4xx: Message})
+    def set_handled(self, request, review_id: UUID, payload: HandledIn):
+        """Mark or unmark a review as handled ("I replied on the OTA already").
+
+        Handled reviews leave the needs-reply piles until the next sync
+        confirms the reply; the mark never blocks the sync from updating."""
+        try:
+            review = _user_review_qs(request).get(id=review_id)
+        except Review.DoesNotExist:
+            return 404, {"message": "Review not found"}
+        review.handled_at = timezone.now() if payload.handled else None
+        review.save(update_fields=["handled_at", "updated_at"])
+        return 200, review
 
     @http_get("/export/csv")
     def export_reviews_csv(

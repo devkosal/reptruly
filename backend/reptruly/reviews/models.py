@@ -81,6 +81,9 @@ class Review(UUIDModel, DateModel):
     draft_generated_at = models.DateTimeField(
         _("Draft Generated At"), null=True, blank=True
     )
+    # User attested they replied on the OTA; hides the review from "needs reply"
+    # until the next sync flips has_reply. Cleared by the user, never by the sync.
+    handled_at = models.DateTimeField(_("Marked Handled At"), null=True, blank=True)
     scores = models.JSONField(_("Scores"), default=list)
     tags = models.JSONField(_("Tags"), default=list)
     reviewed_at = models.DateTimeField(_("Reviewed At"), null=True, blank=True)

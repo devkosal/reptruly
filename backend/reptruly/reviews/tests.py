@@ -220,3 +220,84 @@ class TestSendRateOpportunityAlerts:
         with patch("reptruly.reviews.rate_alerts.get_plan", return_value=PRO):
             result = send_rate_opportunity_alerts()
         assert result == {"sent": 0}
+
+
+class TestMarkHandled:
+    """The 'I replied on the OTA already' mark."""
+
+    def _setup(self, client, score=3.0):
+        user = UserFactory()
+        Property.objects.create(
+            user=user, property_name="Handled Hotel", booking_hotel_id="9001"
+        )
+        review = Review.objects.create(
+            channex_id=f"handled-{Review.objects.count()}",
+            property_id="9001",
+            property_name="Handled Hotel",
+            ota_name="Booking.com",
+            has_reply=False,
+            overall_score=score,
+        )
+        client.force_login(user)
+        return user, review
+
+    def test_mark_and_unmark(self, client):
+        _, review = self._setup(client)
+        res = client.patch(
+            f"/api/reviews/{review.id}/handled",
+            data='{"handled": true}',
+            content_type="application/json",
+        )
+        assert res.status_code == 200
+        review.refresh_from_db()
+        assert review.handled_at is not None
+
+        res = client.patch(
+            f"/api/reviews/{review.id}/handled",
+            data='{"handled": false}',
+            content_type="application/json",
+        )
+        assert res.status_code == 200
+        review.refresh_from_db()
+        assert review.handled_at is None
+
+    def test_handled_leaves_triage_and_needs_reply(self, client):
+        _, review = self._setup(client)
+        Review.objects.create(
+            channex_id="handled-other",
+            property_id="9001",
+            property_name="Handled Hotel",
+            ota_name="Booking.com",
+            has_reply=False,
+            overall_score=2.0,
+        )
+        client.patch(
+            f"/api/reviews/{review.id}/handled",
+            data='{"handled": true}',
+            content_type="application/json",
+        )
+
+        triage = client.get("/api/reviews/triage/summary").json()
+        assert triage["unanswered_total"] == 1
+        assert triage["handled_awaiting"] == 1
+
+        listed = client.get("/api/reviews?has_reply=false&handled=false").json()
+        assert listed["total"] == 1
+
+        # Without the handled filter, both still list.
+        assert client.get("/api/reviews?has_reply=false").json()["total"] == 2
+
+    def test_cannot_mark_another_users_review(self, client):
+        self._setup(client)
+        stranger_review = Review.objects.create(
+            channex_id="handled-stranger",
+            property_id="someone-elses-hotel",
+            property_name="Not Yours",
+            has_reply=False,
+        )
+        res = client.patch(
+            f"/api/reviews/{stranger_review.id}/handled",
+            data='{"handled": true}',
+            content_type="application/json",
+        )
+        assert res.status_code == 404

@@ -23,8 +23,13 @@ class ReviewOut(Schema):
     reviewed_at: Optional[datetime] = None
     draft_reply: str = ""
     draft_generated_at: Optional[datetime] = None
+    handled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+
+class HandledIn(Schema):
+    handled: bool
 
 
 class ReviewListOut(Schema):
@@ -38,7 +43,8 @@ class ReviewListOut(Schema):
 
 
 class TriageSummaryOut(Schema):
-    """Counts behind the inbox triage presets."""
+    """Counts behind the inbox triage presets. "Unanswered" excludes reviews
+    the user marked handled (replied on the OTA, awaiting sync confirmation)."""
 
     unanswered_total: int
     # Unanswered with score <= 6 — the angry-guest pile.
@@ -47,6 +53,8 @@ class TriageSummaryOut(Schema):
     recent_unanswered: int
     # Unanswered with score >= 9 — quick wins to thank.
     positive_unthanked: int
+    # Marked handled but the sync hasn't confirmed a reply yet.
+    handled_awaiting: int = 0
 
 
 class ReplyIn(Schema):

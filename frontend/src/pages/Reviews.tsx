@@ -21,6 +21,7 @@ interface Review {
   tags: string[]
   draft_reply: string
   draft_generated_at: string | null
+  handled_at: string | null
 }
 
 interface ReviewListResponse {
@@ -36,6 +37,7 @@ interface TriageSummary {
   negative_unanswered: number
   recent_unanswered: number
   positive_unthanked: number
+  handled_awaiting: number
 }
 
 const PAGE_LIMIT = 20
@@ -181,17 +183,40 @@ export default function Reviews() {
   // Detail modal
   const [selectedReview, setSelectedReview] = useState<Review | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
+  async function fetchTriage() {
     const qs = selectedProperty
       ? `?property_name=${encodeURIComponent(selectedProperty.property_name)}`
       : ''
-    fetch(`/api/reviews/triage/summary${qs}`, { credentials: 'include' })
-      .then(res => (res.ok ? (res.json() as Promise<TriageSummary>) : null))
-      .then(json => { if (!cancelled && json) setTriage(json) })
-      .catch(() => { /* chips simply stay hidden */ })
-    return () => { cancelled = true }
-  }, [selectedProperty])
+    try {
+      const res = await fetch(`/api/reviews/triage/summary${qs}`, { credentials: 'include' })
+      if (res.ok) setTriage(await res.json())
+    } catch { /* chips simply stay hidden */ }
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchTriage() }, [selectedProperty])
+
+  // "I replied on the OTA already" — hides the review from needs-reply piles
+  // until the next sync confirms; undoable from the Any-status view.
+  async function setHandled(review: Review, handled: boolean) {
+    try {
+      const res = await fetch(`/api/reviews/${review.id}/handled`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handled }),
+      })
+      if (!res.ok) return
+      const updated: Review = await res.json()
+      if (handled && replyFilter === 'false') {
+        // The review no longer belongs in the needs-reply view.
+        setReviews(rs => rs.filter(x => x.id !== review.id))
+        setTotal(t => Math.max(0, t - 1))
+      } else {
+        setReviews(rs => rs.map(x => (x.id === review.id ? { ...x, handled_at: updated.handled_at } : x)))
+      }
+      fetchTriage()
+    } catch { /* leave the row as-is */ }
+  }
 
   function toggleExpanded(id: string) {
     setExpandedIds(prev => {
@@ -337,6 +362,8 @@ export default function Reviews() {
     if (search) params.set('search', search)
     if (otaFilter) params.set('ota_name', otaFilter)
     if (replyFilter !== '') params.set('has_reply', replyFilter)
+    // "Needs reply" means unanswered AND not marked handled.
+    if (replyFilter === 'false') params.set('handled', 'false')
     if (tagFilter) params.set('tag', tagFilter)
     if (minScore) params.set('min_score', minScore)
     if (maxScore) params.set('max_score', maxScore)
@@ -443,6 +470,7 @@ export default function Reviews() {
           </button>
           <span style={{ fontSize: 12, color: 'var(--text-faint)', marginLeft: 'auto' }}>
             {triage.unanswered_total.toLocaleString()} awaiting reply · {triage.recent_unanswered.toLocaleString()} new this week
+            {triage.handled_awaiting > 0 && <> · {triage.handled_awaiting.toLocaleString()} handled, awaiting sync</>}
           </span>
         </div>
       )}
@@ -630,6 +658,14 @@ export default function Reviews() {
                       </span>
                       {r.has_reply ? (
                         <span className="chip chip-good" style={{ fontSize: 11, padding: '2px 8px' }}>✓ Replied</span>
+                      ) : r.handled_at ? (
+                        <span
+                          className="chip chip-accent"
+                          style={{ fontSize: 11, padding: '2px 8px' }}
+                          title="You marked this as replied on the OTA — the next sync will confirm it"
+                        >
+                          ☑ Handled
+                        </span>
                       ) : (
                         <span className="chip chip-warn" style={{ fontSize: 11, padding: '2px 8px' }}>Pending</span>
                       )}
@@ -671,12 +707,34 @@ export default function Reviews() {
                         </button>
                       )}
                       <span style={{ flex: 1 }} />
-                      {!r.has_reply && r.draft_reply && (
+                      {!r.has_reply && r.handled_at && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={e => { e.stopPropagation(); setHandled(r, false) }}
+                          title="Put this review back in the needs-reply pile"
+                          style={{ whiteSpace: 'nowrap', padding: '5px 10px', color: 'var(--text-muted)' }}
+                        >
+                          Undo handled
+                        </button>
+                      )}
+                      {!r.has_reply && !r.handled_at && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={e => { e.stopPropagation(); setHandled(r, true) }}
+                          title="Already replied on the OTA? This hides the review from Needs reply until the next sync confirms it."
+                          style={{ whiteSpace: 'nowrap', padding: '5px 10px', color: 'var(--text-muted)' }}
+                        >
+                          ✓ Mark handled
+                        </button>
+                      )}
+                      {!r.has_reply && !r.handled_at && r.draft_reply && (
                         <span className="chip chip-accent" style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap' }}>
                           Draft ready
                         </span>
                       )}
-                      {!r.has_reply && (
+                      {!r.has_reply && !r.handled_at && (
                         <button
                           type="button"
                           className="btn btn-secondary btn-sm"
@@ -687,7 +745,7 @@ export default function Reviews() {
                           AI draft
                         </button>
                       )}
-                      {!r.has_reply && r.property_id && (() => {
+                      {!r.has_reply && !r.handled_at && r.property_id && (() => {
                         const href = replyUrlForReview(r.ota_name, r.property_id)
                         return href ? (
                           <a
