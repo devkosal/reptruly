@@ -89,15 +89,71 @@ interface RateHistoryResponse {
   snapshots: RateSnapshotRow[]
 }
 
+function shortDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`)
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+// Fewer than this many snapshots and a "trend line" is just dots — show the
+// building-history panel instead of a chart.
+const MIN_TREND_POINTS = 3
+
+function RateHistorySparse({ rows, currency }: { rows: RateSnapshotRow[]; currency: string }) {
+  const latest = rows[rows.length - 1]
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div>
+          <div className="stat-label">Your rate</div>
+          <div style={{ fontSize: 22, fontWeight: 750, color: 'var(--ink)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+            {formatPrice(latest.user_rate, currency)}
+          </div>
+        </div>
+        <div>
+          <div className="stat-label">Comp-set average</div>
+          <div style={{ fontSize: 22, fontWeight: 750, color: 'var(--ink)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+            {formatPrice(latest.comp_avg, currency)}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 2 }}>
+            {latest.comp_count} hotel{latest.comp_count === 1 ? '' : 's'}
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ display: 'inline-flex', gap: 5 }}>
+          {Array.from({ length: MIN_TREND_POINTS }, (_, i) => (
+            <span
+              key={i}
+              style={{
+                width: 9, height: 9, borderRadius: '50%',
+                background: i < rows.length ? 'var(--accent)' : 'var(--surface-2)',
+                border: `1px solid ${i < rows.length ? 'var(--accent)' : 'var(--border-strong)'}`,
+              }}
+            />
+          ))}
+        </span>
+        <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+          Day {rows.length} of tracking (since {shortDate(rows[0].snapshot_date)}) — the trend chart
+          appears after {MIN_TREND_POINTS} daily snapshots.
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function RateHistoryChart({ rows, currency }: { rows: RateSnapshotRow[]; currency: string }) {
   const W = 720
-  const H = 200
-  const PAD = { top: 16, right: 16, bottom: 26, left: 8 }
+  const H = 220
+  const PAD = { top: 18, right: 64, bottom: 28, left: 52 }
 
   const values = rows
     .flatMap(r => [r.user_rate, r.comp_avg])
     .filter((v): v is number => v !== null)
   if (values.length === 0) return null
+
+  if (rows.length < MIN_TREND_POINTS) {
+    return <RateHistorySparse rows={rows} currency={currency} />
+  }
 
   let min = Math.min(...values)
   let max = Math.max(...values)
@@ -111,8 +167,7 @@ function RateHistoryChart({ rows, currency }: { rows: RateSnapshotRow[]; currenc
 
   const plotW = W - PAD.left - PAD.right
   const plotH = H - PAD.top - PAD.bottom
-  const x = (i: number) =>
-    rows.length === 1 ? PAD.left + plotW / 2 : PAD.left + (i * plotW) / (rows.length - 1)
+  const x = (i: number) => PAD.left + (i * plotW) / (rows.length - 1)
   const y = (v: number) => PAD.top + (1 - (v - min) / (max - min)) * plotH
 
   const points = (get: (r: RateSnapshotRow) => number | null) =>
@@ -128,6 +183,37 @@ function RateHistoryChart({ rows, currency }: { rows: RateSnapshotRow[]; currenc
   const userPoints = points(r => r.user_rate)
   const first = rows[0]
   const last = rows[rows.length - 1]
+  const mid = rows[Math.floor((rows.length - 1) / 2)]
+
+  // Recessive horizontal gridlines with price labels.
+  const ticks = [0, 1, 2, 3].map(i => min + ((max - min) * i) / 3)
+
+  // "Gap to market" summary — only when both series exist at both ends.
+  const gapSummary = (() => {
+    if (first.user_rate === null || first.comp_avg === null) return null
+    if (last.user_rate === null || last.comp_avg === null) return null
+    const gapNow = last.comp_avg - last.user_rate
+    const gapFirst = first.comp_avg - first.user_rate
+    const delta = gapNow - gapFirst
+    const position = gapNow >= 0 ? 'below' : 'above'
+    const trend = Math.abs(delta) < 1
+      ? 'unchanged'
+      : `${Math.abs(gapNow) > Math.abs(gapFirst) ? 'widened' : 'narrowed'} ${formatPrice(Math.abs(delta), currency)}`
+    return `You're ${formatPrice(Math.abs(gapNow), currency)} ${position} the comp-set average — gap ${trend} since ${shortDate(first.snapshot_date)}.`
+  })()
+
+  const endLabel = (v: number | null) =>
+    v === null ? null : (
+      <text
+        x={W - PAD.right + 8}
+        y={y(v) + 4}
+        fontSize={11}
+        fontWeight={600}
+        fill="var(--text-muted)"
+      >
+        {formatPrice(v, currency)}
+      </text>
+    )
 
   return (
     <div>
@@ -137,10 +223,17 @@ function RateHistoryChart({ rows, currency }: { rows: RateSnapshotRow[]; currenc
         role="img"
         aria-label="Your rate vs comp-set average over time"
       >
-        <line
-          x1={PAD.left} y1={H - PAD.bottom} x2={W - PAD.right} y2={H - PAD.bottom}
-          stroke="var(--border)" strokeWidth={1}
-        />
+        {ticks.map(t => (
+          <g key={t}>
+            <line
+              x1={PAD.left} y1={y(t)} x2={W - PAD.right} y2={y(t)}
+              stroke="var(--border)" strokeWidth={1}
+            />
+            <text x={PAD.left - 8} y={y(t) + 3.5} fontSize={10.5} fill="var(--text-faint)" textAnchor="end">
+              {formatPrice(t, currency)}
+            </text>
+          </g>
+        ))}
         {compPoints && (
           <polyline
             points={compPoints}
@@ -164,27 +257,42 @@ function RateHistoryChart({ rows, currency }: { rows: RateSnapshotRow[]; currenc
         {rows.map((r, i) => (
           <g key={r.snapshot_date}>
             {r.comp_avg !== null && (
-              <circle cx={x(i)} cy={y(r.comp_avg)} r={3} fill="var(--cyan)">
-                <title>{`${r.snapshot_date} — comp avg ${formatPrice(r.comp_avg, currency)} (${r.comp_count} hotels)`}</title>
-              </circle>
+              <circle cx={x(i)} cy={y(r.comp_avg)} r={3} fill="var(--cyan)" stroke="var(--surface)" strokeWidth={1.5} />
             )}
             {r.user_rate !== null && (
-              <circle cx={x(i)} cy={y(r.user_rate)} r={3} fill="var(--accent)">
-                <title>{`${r.snapshot_date} — your rate ${formatPrice(r.user_rate, currency)}`}</title>
-              </circle>
+              <circle cx={x(i)} cy={y(r.user_rate)} r={3} fill="var(--accent)" stroke="var(--surface)" strokeWidth={1.5} />
             )}
+            {/* One generous invisible hit target per day, carrying the tooltip for both series. */}
+            <rect
+              x={x(i) - plotW / (rows.length - 1) / 2}
+              y={PAD.top}
+              width={plotW / (rows.length - 1)}
+              height={plotH}
+              fill="transparent"
+            >
+              <title>
+                {`${shortDate(r.snapshot_date)}\nYour rate: ${formatPrice(r.user_rate, currency)}\nComp-set avg: ${formatPrice(r.comp_avg, currency)} (${r.comp_count} hotels)`}
+              </title>
+            </rect>
           </g>
         ))}
+        {endLabel(last.user_rate)}
+        {last.comp_avg !== null && last.user_rate !== null && Math.abs(y(last.comp_avg) - y(last.user_rate)) < 14
+          ? null
+          : endLabel(last.comp_avg)}
         <text x={PAD.left} y={H - 8} fontSize={11} fill="var(--text-faint)">
-          {first.snapshot_date}
+          {shortDate(first.snapshot_date)}
         </text>
-        {rows.length > 1 && (
-          <text x={W - PAD.right} y={H - 8} fontSize={11} fill="var(--text-faint)" textAnchor="end">
-            {last.snapshot_date}
+        {rows.length > 2 && mid.snapshot_date !== first.snapshot_date && mid.snapshot_date !== last.snapshot_date && (
+          <text x={x(rows.indexOf(mid))} y={H - 8} fontSize={11} fill="var(--text-faint)" textAnchor="middle">
+            {shortDate(mid.snapshot_date)}
           </text>
         )}
+        <text x={W - PAD.right} y={H - 8} fontSize={11} fill="var(--text-faint)" textAnchor="end">
+          {shortDate(last.snapshot_date)}
+        </text>
       </svg>
-      <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+      <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <span style={{ width: 14, height: 3, borderRadius: 2, background: 'var(--accent)' }} />
           Your rate{last.user_rate !== null && <strong style={{ color: 'var(--text)' }}> {formatPrice(last.user_rate, currency)}</strong>}
@@ -194,6 +302,11 @@ function RateHistoryChart({ rows, currency }: { rows: RateSnapshotRow[]; currenc
           Comp-set average{last.comp_avg !== null && <strong style={{ color: 'var(--text)' }}> {formatPrice(last.comp_avg, currency)}</strong>}
         </span>
       </div>
+      {gapSummary && (
+        <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--text)', background: 'var(--accent-soft)', border: '1px solid #dcdffc', borderRadius: 9, padding: '8px 12px', display: 'inline-block' }}>
+          {gapSummary}
+        </div>
+      )}
     </div>
   )
 }
@@ -935,8 +1048,19 @@ export default function Rates() {
               />
             </>
           ) : (
-            <div className="empty-state">
-              <p>History builds up as daily rate syncs run.</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 0' }}>
+              <div style={{
+                width: 40, height: 40, borderRadius: 11, flexShrink: 0,
+                background: 'var(--accent-soft)', display: 'inline-flex',
+                alignItems: 'center', justifyContent: 'center', fontSize: 18,
+              }}>
+                📈
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                <strong style={{ color: 'var(--ink)' }}>No snapshots yet for this property.</strong>{' '}
+                Each daily rates sync records your rate and the comp-set average, and the trend
+                appears here after a few days. Use <em>Sync rates now</em> below to record the first one.
+              </div>
             </div>
           )}
         </div>
