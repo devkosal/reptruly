@@ -302,3 +302,7 @@ reptruly/media/
 .playwright-mcp/
 .claude/
 /*.jpeg
+
+# Environment files hold real API keys — never commit them.
+# Copy backend/.envs.example/* into backend/.envs/ and fill in values.
+backend/.envs/

@@ -1,0 +1,48 @@
+# Copy to backend/.envs/.local/.django and fill in the keys you need.
+# backend/.envs/ is gitignored — never commit real keys.
+
+# Django
+DJANGO_SETTINGS_MODULE=config.settings.local
+DJANGO_DEBUG=True
+USE_DOCKER=yes
+
+# Database
+DATABASE_URL=postgres://postgres:password@postgres:5432/reptruly_db
+
+# Redis/Celery
+REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/0
+
+# Superuser (created on first run)
+DJANGO_SUPERUSER_USERNAME=admin
+DJANGO_SUPERUSER_EMAIL=admin@reptruly.com
+DJANGO_SUPERUSER_PASSWORD=password
+
+# Stripe (test keys)
+STRIPE_LIVE_MODE=false
+STRIPE_TEST_SECRET_KEY=sk_test_xxx
+STRIPE_TEST_PUBLIC_KEY=pk_test_xxx
+# Base URL for Stripe return URLs (billing portal). Use an https ngrok domain for local
+# portal testing, e.g. https://<id>.ngrok-free.app
+DOMAIN_NAME=http://localhost:8002
+
+# Channex
+CHANNEX_API_KEY=xxx
+CHANNEX_BASE_URL=https://staging.channex.io/api/v1
+
+# RapidAPI / Booking.com
+RAPIDAPI_KEY=xxx
+
+# OpenAI
+OPENAI_API_KEY=sk-proj-xxx
+BOOKING_COM_HOTEL_ID=58310
+
+# Ticketmaster (events for the Demand Calendar)
+TICKETMASTER_API_KEY=xxx
+
+# Google Places (reviews for properties with a google_place_id)
+GOOGLE_PLACES_API_KEY=xxx
+
+# Celery Flower
+CELERY_FLOWER_USER=admin
+CELERY_FLOWER_PASSWORD=password
