@@ -56,6 +56,23 @@ function formatPrice(price: number | null, currency: string): string {
   }
 }
 
+function median(nums: number[]): number | null {
+  if (!nums.length) return null
+  const s = [...nums].sort((a, b) => a - b)
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
+}
+
+// Booking.com comp results mix real hotels with condos, private rooms, and
+// vacation rentals whose prices skew the market read for a hotel. Name-based
+// heuristic — deliberately narrow so "Inn & Suites"-style hotel names pass.
+const RENTAL_RE = /#\s?\d|\bcondos?\b|\bapartments?\b|\bapt\b|\bstudios?\b|\bvillas?\b|\bcottages?\b|\bbungalows?\b|\brooms?\b|\bsuite at\b|\bhomes?\b|\bhouses?\b|\blofts?\b|\bcabins?\b/i
+function looksLikeRental(name: string): boolean {
+  return RENTAL_RE.test(name)
+}
+
+type SortKey = 'rate' | 'distance' | 'stars' | 'review' | 'vs'
+
 // ---------- Rate history (daily snapshots from the rates sync) ----------
 
 interface RateSnapshotRow {
@@ -402,6 +419,19 @@ export default function Rates() {
   const [distanceFilter, setDistanceFilter] = useState<Set<DistanceBucket> | null>(null)
   const [reviewFilter, setReviewFilter] = useState<Set<ReviewBucket> | null>(null)
   const [rateFilter, setRateFilter] = useState<Set<RateBucket> | null>(null)
+  // Hide condos / private rooms / vacation rentals from the comp set by default.
+  const [hotelsOnly, setHotelsOnly] = useState(true)
+  const [sortKey, setSortKey] = useState<SortKey>('rate')
+  const [sortDir, setSortDir] = useState<1 | -1>(1)
+
+  function toggleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir(d => (d === 1 ? -1 : 1))
+    } else {
+      setSortKey(key)
+      setSortDir(1)
+    }
+  }
 
   // Default to first property if nothing selected
   useEffect(() => {
@@ -502,9 +532,13 @@ export default function Rates() {
   }, [selectedProperty?.id])
 
   // Apply all filters; the user's own property is always included regardless of filters.
+  const rentalsHidden = data && hotelsOnly
+    ? data.competitors.filter(c => !c.is_user_property && looksLikeRental(c.hotel_name)).length
+    : 0
   const filteredCompetitors = data
     ? data.competitors.filter(c => {
         if (c.is_user_property) return true
+        if (hotelsOnly && looksLikeRental(c.hotel_name)) return false
         if (starFilter && !starFilter.has(starBucketFor(c.star_rating))) return false
         if (distanceFilter && !distanceFilter.has(distanceBucketFor(c.distance_km))) return false
         if (reviewFilter && !reviewFilter.has(reviewBucketFor(c.review_score))) return false
@@ -513,28 +547,70 @@ export default function Rates() {
       })
     : []
 
+  const userPriceFromComps = data?.competitors.find(c => c.is_user_property)?.price ?? data?.user_rate ?? null
+
+  const sortValue = (c: CompetitorRate): number | null => {
+    switch (sortKey) {
+      case 'rate': return c.price
+      case 'distance': return c.distance_km
+      case 'stars': return c.star_rating
+      case 'review': return c.review_score
+      case 'vs': return c.price !== null && userPriceFromComps !== null ? c.price - userPriceFromComps : null
+    }
+  }
+  // Nulls always sort last, whatever the direction.
   const sortedCompetitors = filteredCompetitors
     .filter(c => c.price !== null)
-    .sort((a, b) => (a.price! - b.price!))
+    .sort((a, b) => {
+      const va = sortValue(a)
+      const vb = sortValue(b)
+      if (va === null && vb === null) return 0
+      if (va === null) return 1
+      if (vb === null) return -1
+      return (va - vb) * sortDir
+    })
 
-  // Recompute "vs market average" from the filtered set so the verdict matches what the user sees.
-  const userPriceFromComps = data?.competitors.find(c => c.is_user_property)?.price ?? data?.user_rate ?? null
+  // Market read from the filtered set, so the verdict matches what the user
+  // sees. Median headline (robust to one $700 outlier); average as context.
   const compPrices = filteredCompetitors
     .filter(c => !c.is_user_property && c.price !== null)
     .map(c => c.price as number)
   const filteredAvg = compPrices.length ? compPrices.reduce((a, b) => a + b, 0) / compPrices.length : null
-  const filteredVsAvgPct =
-    userPriceFromComps !== null && filteredAvg
-      ? ((userPriceFromComps - filteredAvg) / filteredAvg) * 100
+  const filteredMedian = median(compPrices)
+  const filteredVsMedianPct =
+    userPriceFromComps !== null && filteredMedian
+      ? ((userPriceFromComps - filteredMedian) / filteredMedian) * 100
       : null
 
   // Semantic tint only: cheaper than market = good, pricier = bad, on par = accent.
   const positionVerdict = (() => {
-    if (filteredVsAvgPct === null) return null
-    const pct = filteredVsAvgPct
+    if (filteredVsMedianPct === null) return null
+    const pct = filteredVsMedianPct
     if (pct < -10) return { label: 'Below market', color: 'var(--good)', chip: 'chip-good' }
     if (pct > 10) return { label: 'Above market', color: 'var(--bad)', chip: 'chip-bad' }
     return { label: 'On par with market', color: 'var(--accent)', chip: 'chip-accent' }
+  })()
+
+  // Price position + the actionable take-away: where you rank by price and how
+  // much headroom you have before overtaking the next hotel up.
+  const priceInsight = (() => {
+    if (userPriceFromComps === null || compPrices.length === 0 || !data) return null
+    const sorted = [...compPrices].sort((a, b) => a - b)
+    const cheaperCount = sorted.filter(p => p < userPriceFromComps).length
+    const rank = cheaperCount + 1
+    const total = sorted.length + 1
+    const nextUp = sorted.find(p => p > userPriceFromComps) ?? null
+    let takeaway: string
+    if (rank === 1 && nextUp !== null) {
+      takeaway = `Next-cheapest is ${formatPrice(nextUp, data.currency)} — room to raise ${formatPrice(nextUp - userPriceFromComps, data.currency)}`
+    } else if (nextUp === null) {
+      takeaway = filteredMedian !== null
+        ? `Priciest in the set — market median is ${formatPrice(filteredMedian, data.currency)}`
+        : 'Priciest in the comp set'
+    } else {
+      takeaway = `${formatPrice(nextUp - userPriceFromComps, data.currency)} below the next hotel up`
+    }
+    return { rank, total, takeaway }
   })()
 
   // History for the tracked check-in matching the selected stay: prefer a
@@ -571,23 +647,9 @@ export default function Rates() {
       }
     >
 
-      {/* One filters row: property + stay controls, plus comp-set filters once data lands */}
+      {/* One filters row: stay controls plus comp-set filters once data lands.
+          (The property itself is picked in the sidebar.) */}
       <div className="filters">
-        <select
-          className="filter-select"
-          value={selectedProperty?.id || ''}
-          onChange={e => {
-            const p = properties.find(x => x.id === e.target.value) || null
-            setSelectedProperty(p)
-          }}
-          style={{ minWidth: 240 }}
-        >
-          <option value="" disabled>Select a property…</option>
-          {properties.map(p => (
-            <option key={p.id} value={p.id}>{p.property_name}</option>
-          ))}
-        </select>
-
         <label style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
           Check-in
           <input
@@ -654,6 +716,26 @@ export default function Rates() {
               selected={rateFilter ?? new Set<RateBucket>()}
               onChange={setRateFilter}
             />
+            <label
+              title="Hide condos, apartments, private rooms, and vacation rentals from the comp set"
+              style={{
+                fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'flex',
+                alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={hotelsOnly}
+                onChange={e => setHotelsOnly(e.target.checked)}
+                style={{ cursor: 'pointer', accentColor: 'var(--accent)' }}
+              />
+              Hotels only
+              {hotelsOnly && rentalsHidden > 0 && (
+                <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--text-faint)' }}>
+                  ({rentalsHidden} rental{rentalsHidden === 1 ? '' : 's'} hidden)
+                </span>
+              )}
+            </label>
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => {
@@ -661,6 +743,7 @@ export default function Rates() {
                 setDistanceFilter(new Set(DISTANCE_OPTIONS.map(o => o.value)))
                 setReviewFilter(new Set(REVIEW_OPTIONS.map(o => o.value)))
                 setRateFilter(new Set(RATE_OPTIONS.map(o => o.value)))
+                setHotelsOnly(false)
               }}
               style={{ marginLeft: 'auto' }}
             >
@@ -699,16 +782,35 @@ export default function Rates() {
             </div>
 
             <div className="stat-card">
-              <div className="stat-label">Vs. market average</div>
+              <div className="stat-label">Vs. market median</div>
               <div className="stat-value" style={{ color: positionVerdict?.color }}>
-                {filteredVsAvgPct === null
+                {filteredVsMedianPct === null
                   ? '—'
-                  : `${filteredVsAvgPct > 0 ? '+' : ''}${filteredVsAvgPct.toFixed(1)}%`}
+                  : `${filteredVsMedianPct > 0 ? '+' : ''}${filteredVsMedianPct.toFixed(1)}%`}
               </div>
-              <div className="stat-sub" style={{ marginTop: 6 }}>
+              <div className="stat-sub" style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 {positionVerdict
                   ? <span className={`chip ${positionVerdict.chip}`}>{positionVerdict.label}</span>
                   : 'No competitor data'}
+                {filteredMedian !== null && (
+                  <span>
+                    median {formatPrice(filteredMedian, data.currency)}
+                    {filteredAvg !== null && ` · avg ${formatPrice(filteredAvg, data.currency)}`}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Price position</div>
+              <div className="stat-value">
+                {priceInsight ? `#${priceInsight.rank}` : '—'}
+                {priceInsight && (
+                  <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-faint)' }}> of {priceInsight.total}</span>
+                )}
+              </div>
+              <div className="stat-sub">
+                {priceInsight ? priceInsight.takeaway : 'No competitor data'}
               </div>
             </div>
 
@@ -719,50 +821,86 @@ export default function Rates() {
             </div>
           </div>
 
-          {/* Comp set table */}
+          {/* Comp set table — click column headers to sort */}
           <div className="table-wrapper table-scroll">
             <table>
               <thead>
                 <tr>
                   <th>#</th>
                   <th>Hotel</th>
-                  <th>Distance</th>
-                  <th>Stars</th>
-                  <th>Review</th>
-                  <th>Rate</th>
+                  {([
+                    { key: 'distance' as SortKey, label: 'Distance' },
+                    { key: 'stars' as SortKey, label: 'Stars' },
+                    { key: 'review' as SortKey, label: 'Review' },
+                    { key: 'rate' as SortKey, label: 'Rate' },
+                    { key: 'vs' as SortKey, label: 'Vs. you' },
+                  ]).map(col => (
+                    <th
+                      key={col.key}
+                      onClick={() => toggleSort(col.key)}
+                      title={`Sort by ${col.label.toLowerCase()}`}
+                      style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                    >
+                      {col.label}
+                      <span style={{ marginLeft: 4, fontSize: 9, color: sortKey === col.key ? 'var(--accent)' : 'var(--text-faint)' }}>
+                        {sortKey === col.key ? (sortDir === 1 ? '▲' : '▼') : '↕'}
+                      </span>
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {sortedCompetitors.map((c, i) => (
-                  <tr
-                    key={c.hotel_id}
-                    style={{
-                      background: c.is_user_property ? 'var(--accent-soft)' : undefined,
-                      fontWeight: c.is_user_property ? 600 : undefined,
-                    }}
-                  >
-                    <td>{i + 1}</td>
-                    <td>
-                      {c.hotel_name}
-                      {c.is_user_property && (
-                        <span className="chip chip-accent" style={{ marginLeft: 8 }}>
-                          You
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ color: 'var(--text-muted)' }}>
-                      {c.distance_km !== null ? `${(c.distance_km * KM_TO_MI).toFixed(1)} mi` : '—'}
-                    </td>
-                    <td>{c.star_rating !== null ? `${c.star_rating.toFixed(0)}★` : '—'}</td>
-                    <td>{c.review_score !== null ? c.review_score.toFixed(1) : '—'}</td>
-                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {formatPrice(c.price, c.currency || data.currency)}
-                    </td>
-                  </tr>
-                ))}
+                {sortedCompetitors.map((c, i) => {
+                  const delta = !c.is_user_property && c.price !== null && userPriceFromComps !== null
+                    ? c.price - userPriceFromComps
+                    : null
+                  const deltaPct = delta !== null && userPriceFromComps
+                    ? (delta / userPriceFromComps) * 100
+                    : null
+                  return (
+                    <tr
+                      key={c.hotel_id}
+                      style={{
+                        background: c.is_user_property ? 'var(--accent-soft)' : undefined,
+                        fontWeight: c.is_user_property ? 600 : undefined,
+                      }}
+                    >
+                      <td>{i + 1}</td>
+                      <td>
+                        {c.hotel_name}
+                        {c.is_user_property && (
+                          <span className="chip chip-accent" style={{ marginLeft: 8 }}>
+                            You
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ color: 'var(--text-muted)' }}>
+                        {c.distance_km !== null ? `${(c.distance_km * KM_TO_MI).toFixed(1)} mi` : '—'}
+                      </td>
+                      <td>{c.star_rating !== null ? `${c.star_rating.toFixed(0)}★` : '—'}</td>
+                      <td>{c.review_score !== null ? c.review_score.toFixed(1) : '—'}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {formatPrice(c.price, c.currency || data.currency)}
+                      </td>
+                      <td style={{
+                        fontVariantNumeric: 'tabular-nums',
+                        whiteSpace: 'nowrap',
+                        // A pricier competitor is good for you (green); one undercutting you is red.
+                        color: delta === null ? 'var(--text-faint)' : delta >= 0 ? 'var(--good)' : 'var(--bad)',
+                        fontWeight: c.is_user_property ? 600 : 500,
+                      }}>
+                        {c.is_user_property
+                          ? '—'
+                          : delta === null
+                            ? '—'
+                            : `${delta >= 0 ? '+' : '−'}${formatPrice(Math.abs(delta), c.currency || data.currency)}${deltaPct !== null ? ` (${delta >= 0 ? '+' : '−'}${Math.abs(deltaPct).toFixed(0)}%)` : ''}`}
+                      </td>
+                    </tr>
+                  )
+                })}
                 {sortedCompetitors.length === 0 && (
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
+                    <td colSpan={7} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
                       {data.competitors.some(c => c.price !== null)
                         ? 'No competitors match the current filters.'
                         : 'No rates available for these dates.'}
