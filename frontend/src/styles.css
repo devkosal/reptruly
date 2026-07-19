@@ -52,7 +52,7 @@ body {
 }
 
 .sidebar {
-  width: 232px;
+  width: 282px;
   background: var(--grad-dark);
   color: #fff;
   padding: 24px 0 12px;
@@ -88,7 +88,7 @@ body {
 .workspace {
   flex: 1;
   min-width: 0;
-  margin-left: 232px;
+  margin-left: 282px;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -756,47 +756,48 @@ tbody tr:hover td { background: #f8f9fd; }
 
 .sidebar-property-row {
   position: relative;
-  margin-bottom: 2px;
+  margin-bottom: 6px;
 }
 
 .sidebar-property-btn {
   display: flex;
-  align-items: center;
-  gap: 9px;
+  align-items: flex-start;
+  gap: 10px;
   width: 100%;
-  background: none;
-  border: none;
-  border-radius: 9px;
-  padding: 6px 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 11px;
+  padding: 10px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s;
-  margin-bottom: 2px;
+  transition: background 0.15s, border-color 0.15s;
+  margin-bottom: 6px;
   color: rgba(255,255,255,0.72);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   font-family: inherit;
 }
 
 .sidebar-property-btn:hover {
-  background: rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.09);
+  border-color: rgba(255,255,255,0.14);
 }
 
 .sidebar-property-btn.active {
-  background: rgba(79,70,229,0.28);
+  background: rgba(79,70,229,0.3);
+  border-color: rgba(129,140,248,0.45);
   color: #fff;
-  box-shadow: inset 0 0 0 1px rgba(129,140,248,0.3);
 }
 
 .sp-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.12);
-  color: rgba(255,255,255,0.75);
+  color: rgba(255,255,255,0.78);
   font-weight: 700;
-  font-size: 12px;
+  font-size: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -810,7 +811,7 @@ tbody tr:hover td { background: #f8f9fd; }
 }
 
 .sp-avatar-all {
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .sp-text {
@@ -821,13 +822,19 @@ tbody tr:hover td { background: #f8f9fd; }
 }
 
 .sp-name {
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 600;
-  color: rgba(255,255,255,0.85);
-  line-height: 1.3;
-  white-space: nowrap;
+  color: rgba(255,255,255,0.92);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+/* Leave room for the edit/remove buttons pinned to the row's top-right */
+.sidebar-property-row .sp-name {
+  padding-right: 48px;
 }
 
 .sidebar-property-btn.active .sp-name {
@@ -835,9 +842,9 @@ tbody tr:hover td { background: #f8f9fd; }
 }
 
 .sp-loc {
-  font-size: 10px;
-  color: rgba(255,255,255,0.35);
-  margin-top: 1px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.42);
+  margin-top: 3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -845,12 +852,11 @@ tbody tr:hover td { background: #f8f9fd; }
 
 .sp-actions {
   position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
+  right: 8px;
+  top: 8px;
   display: flex;
   gap: 4px;
-  opacity: 0;
+  opacity: 0.45;
   transition: opacity 0.15s;
 }
 
@@ -860,12 +866,12 @@ tbody tr:hover td { background: #f8f9fd; }
 }
 
 .sp-action {
-  width: 22px;
-  height: 22px;
+  width: 23px;
+  height: 23px;
   border-radius: 6px;
-  background: #1b2233;
-  border: 1px solid rgba(255,255,255,0.18);
-  color: rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.16);
+  color: rgba(255,255,255,0.75);
   cursor: pointer;
   font-size: 11px;
   line-height: 1;
@@ -1320,7 +1326,7 @@ tbody tr:hover td { background: #f8f9fd; }
 @media (max-width: 900px) {
   .main { min-width: 0; max-width: 100vw; }
   .main .card { min-width: 0; max-width: 100%; }
-  .sidebar { transform: translateX(-100%); transition: transform 0.25s ease; z-index: 220; width: 260px; }
+  .sidebar { transform: translateX(-100%); transition: transform 0.25s ease; z-index: 220; width: 282px; }
   .sidebar.open { transform: translateX(0); box-shadow: 0 0 40px rgba(0,0,0,0.5); }
   .sidebar-overlay { display: block; position: fixed; inset: 0; background: rgba(11,18,32,0.5); z-index: 210; }
   .mobile-topbar { display: flex; position: fixed; top: 0; left: 0; right: 0; height: 52px; z-index: 200;
