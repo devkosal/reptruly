@@ -527,20 +527,26 @@ function buildOTAView(ota: string, data: AnalyticsData, trends: TrendsData): Ana
 
 type ViewMode = 'overview' | 'insights'
 
-// Report time-period presets — drives the `days` param passed to the report page.
-const REPORT_PERIODS: { value: string; label: string }[] = [
-  { value: 'page', label: 'Same as page filter' },
-  { value: '1', label: 'Today (last 24h)' },
-  { value: '2', label: 'Last 2 days' },
-  { value: '3', label: 'Last 3 days' },
-  { value: '7', label: 'Last 7 days (weekly)' },
+// One shared period picker: it filters everything on the page AND sets the
+// range the PDF report covers.
+const PERIODS: { value: string; label: string }[] = [
+  { value: 'all', label: 'All time' },
+  { value: '1', label: 'Today' },
+  { value: '7', label: 'Last 7 days' },
   { value: '14', label: 'Last 14 days' },
-  { value: '30', label: 'Last 30 days (monthly)' },
+  { value: '30', label: 'Last 30 days' },
   { value: '90', label: 'Last 3 months' },
   { value: '180', label: 'Last 6 months' },
-  { value: '365', label: 'Last 12 months (yearly)' },
+  { value: '365', label: 'Last 12 months' },
   { value: 'custom', label: 'Custom range…' },
 ]
+
+// ISO date n days before today (local clock).
+function isoDaysAgo(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
 
 function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
   const navigate = useNavigate()
@@ -552,14 +558,11 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
   const [viewMode, setViewMode] = useState<ViewMode>('overview')
   // Active OTA tab — 'all' or an OTA name. Used inside Overview. Defaults to 'all'; resets when property changes.
   const [activeTab, setActiveTab] = useState<string>('all')
-  // Date-range filter — applied to all analytics fetches (summary, trends, AI summary).
+  // One period for the whole page AND the PDF report: an 'all'/preset-days
+  // value, or 'custom' with explicit from/to dates.
+  const [period, setPeriod] = useState('all')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
-  // Report time period — a preset number of days back, or 'custom' to use an explicit date range.
-  const [reportDays, setReportDays] = useState('30')
-  // Custom report range (only used when reportDays === 'custom').
-  const [reportFrom, setReportFrom] = useState('')
-  const [reportTo, setReportTo] = useState('')
   // Whether the plan includes the AI sections of the report (Pro).
   const [aiLocked, setAiLocked] = useState(false)
 
@@ -572,8 +575,13 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
   // Only treat a date as "set" when it parses as a complete YYYY-MM-DD string. This stops
   // mid-typing partials (e.g. "2026-05-") from reaching the server and triggering bogus refetches.
   const isCompleteDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s)
-  const fromParam = isCompleteDate(fromDate) ? fromDate : ''
-  const toParam = isCompleteDate(toDate) ? toDate : ''
+  const isCustom = period === 'custom'
+  // The from/to window the selected period resolves to — drives every fetch on
+  // this page. Presets count back from today; 'all' means no bounds.
+  const fromParam = isCustom
+    ? (isCompleteDate(fromDate) ? fromDate : '')
+    : period === 'all' ? '' : isoDaysAgo(Number(period) - 1)
+  const toParam = isCustom ? (isCompleteDate(toDate) ? toDate : '') : ''
 
   useEffect(() => {
     setLoading(true)
@@ -599,8 +607,8 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
     const params = new URLSearchParams()
     if (propertyName) params.set('property_name', propertyName)
     if (otaName) params.set('ota_name', otaName)
-    if (fromDate) params.set('from_date', fromDate)
-    if (toDate) params.set('to_date', toDate)
+    if (fromParam) params.set('from_date', fromParam)
+    if (toParam) params.set('to_date', toParam)
     const qs = params.toString() ? `?${params}` : ''
     navigate(`/reviews${qs}`)
   }
@@ -629,172 +637,102 @@ function PropertyAnalytics({ propertyName }: { propertyName: string | null }) {
   const tabAccent = isAllTab ? 'var(--accent)' : (otaColors[activeTab] || 'var(--accent)')
   const replyRate = view.reply_rate
 
-  const hasDateFilter = !!(fromDate || toDate)
+  // The report covers the same period as the page. A custom range needs both
+  // dates before the report link works; 'all' falls back to the report page's
+  // default (last 30 days + last 12 months).
+  const customReady = isCompleteDate(fromDate) && isCompleteDate(toDate) && fromDate <= toDate
+  const reportReady = !isCustom || customReady
 
-  const isCustomReport = reportDays === 'custom'
-  // "Same as page filter": reuse the page's date-range filter for the report.
-  // Needs at least a From date; an empty To means "up to today".
-  const isPageReport = reportDays === 'page'
-  const todayStr = new Date().toISOString().slice(0, 10)
-  const pageReportFrom = fromParam
-  const pageReportTo = toParam || todayStr
-  const pageReportReady = !!fromParam
-  // For a custom range both dates must be complete before the report can be generated.
-  const customReportReady = isCompleteDate(reportFrom) && isCompleteDate(reportTo) && reportFrom <= reportTo
-  const reportReady = isPageReport ? pageReportReady : (!isCustomReport || customReportReady)
+  const reportParams = new URLSearchParams()
+  if (isCustom && customReady) {
+    reportParams.set('from', fromDate)
+    reportParams.set('to', toDate)
+  } else if (!isCustom && period !== 'all') {
+    reportParams.set('days', period)
+  }
+  if (propertyName) reportParams.set('property', propertyName)
+  const reportHref = reportParams.toString()
+    ? `/analytics/report?${reportParams}`
+    : '/analytics/report'
 
-  const reportQuery = isPageReport
-    ? `from=${pageReportFrom}&to=${pageReportTo}`
-    : isCustomReport
-      ? `from=${reportFrom}&to=${reportTo}`
-      : `days=${reportDays}`
-  const reportHref = propertyName
-    ? `/analytics/report?${reportQuery}&property=${encodeURIComponent(propertyName)}`
-    : `/analytics/report?${reportQuery}`
-
-  const reportPeriodLabel = isPageReport
-    ? (pageReportReady ? `${pageReportFrom} → ${pageReportTo}` : 'same range as the page filter')
-    : isCustomReport
-      ? (customReportReady ? `${reportFrom} → ${reportTo}` : 'custom range')
-      : (REPORT_PERIODS.find(p => p.value === reportDays)?.label ?? `last ${reportDays} days`)
-
-  const reportDisabledHint = isPageReport
-    ? 'Set at least a From date in the page filter on the left first'
-    : 'Pick a valid start and end date'
-
-  // "covering the last 30 days" but "covering 2026-06-01 → 2026-07-19".
-  const reportCoverageText = /^\d/.test(reportPeriodLabel)
-    ? reportPeriodLabel
-    : `the ${reportPeriodLabel.toLowerCase()}`
+  const periodLabel = isCustom
+    ? (customReady ? `${fromDate} → ${toDate}` : 'custom range')
+    : (PERIODS.find(p => p.value === period)?.label ?? `last ${period} days`)
 
   return (
     <>
-      {/* Time controls — one card, two clearly-scoped halves: the left filters
-          what THIS PAGE shows; the right exports a PDF report for a period. */}
-      <div className="card analytics-toolbar" style={{ padding: 0, marginBottom: 18, overflow: 'hidden' }}>
-        {/* Left: page date-range filter */}
-        <div style={{ padding: '16px 20px' }}>
-          <div className="section-title" style={{ marginBottom: 2 }}>
-            View on this page
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-            Filters the KPIs, charts and AI summary below.{' '}
-            {loading && <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Refreshing…</span>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>From</label>
+      {/* One period control — filters everything on the page and sets the
+          range the hotel report covers. */}
+      <div className="card" style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        gap: 16, marginBottom: 18, flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <label htmlFor="analytics-period" className="section-title" style={{ marginBottom: 0 }}>
+            Period
+          </label>
+          <select
+            id="analytics-period"
+            className="filter-select"
+            value={period}
+            onChange={e => setPeriod(e.target.value)}
+            style={{ fontSize: 13, fontWeight: 600, padding: '7px 10px', cursor: 'pointer' }}
+          >
+            {PERIODS.map(p => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+          {isCustom && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <input
                 type="date"
+                aria-label="Start date"
                 className="filter-input"
                 value={fromDate}
                 max={toDate || undefined}
                 onChange={e => setFromDate(e.target.value)}
-                style={{ padding: '7px 10px', fontSize: 13 }}
+                style={{ padding: '7px 9px', fontSize: 12 }}
               />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--text-faint)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em' }}>To</label>
+              <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>→</span>
               <input
                 type="date"
+                aria-label="End date"
                 className="filter-input"
                 value={toDate}
                 min={fromDate || undefined}
                 onChange={e => setToDate(e.target.value)}
-                style={{ padding: '7px 10px', fontSize: 13 }}
+                style={{ padding: '7px 9px', fontSize: 12 }}
               />
             </div>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => { setFromDate(''); setToDate('') }}
-              disabled={!hasDateFilter}
-            >
-              Clear
-            </button>
-            <span style={{ fontSize: 11.5, color: 'var(--text-faint)', paddingBottom: 8 }}>
-              {hasDateFilter ? 'Showing the selected range' : 'Showing all time'}
-            </span>
-          </div>
+          )}
+          <span style={{ fontSize: 11.5, color: loading ? 'var(--accent)' : 'var(--text-faint)', fontWeight: loading ? 600 : 400 }}>
+            {loading ? 'Refreshing…' : 'Applies to all stats, charts and AI insights below — and to the report'}
+          </span>
         </div>
 
-        {/* Right: PDF report export */}
-        <div style={{ padding: '16px 20px', background: 'var(--surface-2)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-            <div className="section-title" style={{ marginBottom: 0 }}>Download a PDF report</div>
-            {aiLocked && (
-              <span className="chip chip-accent" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                AI sections: Pro
-              </span>
-            )}
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-            {aiLocked
-              ? <>A shareable PDF for <strong>{propertyName ?? 'all properties'}</strong> covering {reportCoverageText}: review volumes, average scores and trends per OTA. Upgrade to Pro to add AI insights and topic scores.</>
-              : <>A shareable PDF for <strong>{propertyName ?? 'all properties'}</strong> covering {reportCoverageText}: review volumes, average scores and trends per OTA, plus AI insights and topic scores.</>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <label htmlFor="report-period" style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Period
-            </label>
-            <select
-              id="report-period"
-              className="filter-select"
-              value={reportDays}
-              onChange={e => setReportDays(e.target.value)}
-              style={{ fontSize: 13, fontWeight: 600, padding: '7px 10px', cursor: 'pointer' }}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          {reportReady ? (
+            <a
+              href={reportHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary btn-sm"
+              style={{ textDecoration: 'none', whiteSpace: 'nowrap', display: 'inline-block' }}
             >
-              {REPORT_PERIODS.map(p => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
-            {isCustomReport && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <input
-                  type="date"
-                  aria-label="Report start date"
-                  className="filter-input"
-                  value={reportFrom}
-                  max={reportTo || undefined}
-                  onChange={e => setReportFrom(e.target.value)}
-                  style={{ padding: '7px 9px', fontSize: 12 }}
-                />
-                <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>→</span>
-                <input
-                  type="date"
-                  aria-label="Report end date"
-                  className="filter-input"
-                  value={reportTo}
-                  min={reportFrom || undefined}
-                  onChange={e => setReportTo(e.target.value)}
-                  style={{ padding: '7px 9px', fontSize: 12 }}
-                />
-              </div>
-            )}
-            {reportReady ? (
-              <a
-                href={reportHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-primary btn-sm"
-                style={{ textDecoration: 'none', whiteSpace: 'nowrap', display: 'inline-block' }}
-              >
-                Download PDF report →
-              </a>
-            ) : (
-              <span
-                title={reportDisabledHint}
-                className="btn btn-secondary btn-sm"
-                style={{ opacity: 0.5, cursor: 'not-allowed', whiteSpace: 'nowrap', display: 'inline-block' }}
-              >
-                Download PDF report →
-              </span>
-            )}
-            {isPageReport && !pageReportReady && (
-              <span style={{ fontSize: 11.5, color: 'var(--warn)', fontWeight: 600 }}>
-                Set a From date in the page filter first
-              </span>
-            )}
-          </div>
+              Hotel analytics report (PDF) →
+            </a>
+          ) : (
+            <span
+              title="Pick a valid start and end date first"
+              className="btn btn-secondary btn-sm"
+              style={{ opacity: 0.5, cursor: 'not-allowed', whiteSpace: 'nowrap', display: 'inline-block' }}
+            >
+              Hotel analytics report (PDF) →
+            </span>
+          )}
+          <span style={{ fontSize: 11, color: 'var(--text-faint)', textAlign: 'right' }}>
+            {propertyName ?? 'All properties'} · {periodLabel.toLowerCase() === 'all time' ? 'all time' : periodLabel} · per-OTA scores &amp; trends{aiLocked ? ' · AI sections need Pro' : ' · AI insights'}
+          </span>
         </div>
       </div>
 
