@@ -83,6 +83,17 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+// One-line "why this day is busy" used by the action strip and day cells.
+function dayDriver(d: CalendarDay): string {
+  if (d.holiday) return d.holiday
+  if (d.events.length) {
+    const top = [...d.events].sort((a, b) => b.impact_score - a.impact_score)[0]
+    return top.name + (top.venue_distance_miles !== null ? ` · ${top.venue_distance_miles.toFixed(1)} mi` : '')
+  }
+  if (d.is_weekend) return 'Weekend'
+  return 'Seasonal demand'
+}
+
 function monthKey(year: number, month: number): string {
   return `${year}-${String(month + 1).padStart(2, '0')}`
 }
@@ -119,6 +130,7 @@ export default function Calendar() {
 
   // Month being viewed
   const today = new Date()
+  const isoTodayStr = isoDate(today)
   const [viewYear, setViewYear] = useState(today.getFullYear())
   const [viewMonth, setViewMonth] = useState(today.getMonth())
 
@@ -140,9 +152,12 @@ export default function Calendar() {
   propertyIdRef.current = selectedProperty?.id ?? null
 
   const fetchMonth = useCallback(async (year: number, month: number, forceRefresh = false) => {
-    const key = monthKey(year, month)
     const propertyId = propertyIdRef.current
     if (!propertyId) return
+    // Cache keys include the property: a month loaded for one property must
+    // never satisfy the has() check for another (the reset effect clears the
+    // cache asynchronously, so a same-commit fetch still sees the old map).
+    const key = `${propertyId}:${monthKey(year, month)}`
     if (!forceRefresh && monthsLoaded.has(key)) return
     if (loadingMonths.has(key)) return
 
@@ -188,15 +203,20 @@ export default function Calendar() {
     }
   }, [monthsLoaded, loadingMonths])
 
-  // Whenever the viewed month changes (or property changes), make sure that month is loaded.
+  // Whenever the viewed month changes (or property changes), make sure that
+  // month is loaded — then prefetch the following month so the action strip
+  // can look ahead past the month boundary.
   useEffect(() => {
-    if (selectedProperty) fetchMonth(viewYear, viewMonth)
+    if (!selectedProperty) return
+    const next = new Date(viewYear, viewMonth + 1, 1)
+    fetchMonth(viewYear, viewMonth).then(() => fetchMonth(next.getFullYear(), next.getMonth()))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProperty?.id, viewYear, viewMonth])
 
   const currentMonthKey = monthKey(viewYear, viewMonth)
-  const currentMonthData = monthsLoaded.get(currentMonthKey) ?? null
-  const currentMonthLoading = loadingMonths.has(currentMonthKey)
+  const currentCacheKey = `${selectedProperty?.id}:${currentMonthKey}`
+  const currentMonthData = monthsLoaded.get(currentCacheKey) ?? null
+  const currentMonthLoading = loadingMonths.has(currentCacheKey)
 
   // Index days by ISO date for fast lookup (only the currently-viewed month)
   const daysByDate = useMemo(() => {
@@ -206,6 +226,22 @@ export default function Calendar() {
     }
     return map
   }, [currentMonthData])
+
+  // The days most worth a rate check, across every month loaded so far:
+  // moderate+ demand, upcoming only, highest score first, shown in date order.
+  const upcomingHighlights = useMemo(() => {
+    const byDate = new Map<string, CalendarDay>()
+    for (const md of monthsLoaded.values()) {
+      for (const d of md.days) {
+        if (d.date >= isoTodayStr) byDate.set(d.date, d)
+      }
+    }
+    return [...byDate.values()]
+      .filter(d => d.demand_score >= 2)
+      .sort((a, b) => b.demand_score - a.demand_score || a.date.localeCompare(b.date))
+      .slice(0, 5)
+      .sort((a, b) => a.date.localeCompare(b.date))
+  }, [monthsLoaded, isoTodayStr])
 
   // Boundaries: can navigate from today's month to today's month + 12 (so 13 months total).
   const todayMonthKey = monthKey(today.getFullYear(), today.getMonth())
@@ -249,6 +285,14 @@ export default function Calendar() {
     navigate(`/rates?checkin=${d}&checkout=${co}`)
   }
 
+  // From the action strip: jump the grid to that date's month and expand it.
+  function openHighlight(iso: string) {
+    const dt = new Date(iso + 'T00:00:00')
+    setViewYear(dt.getFullYear())
+    setViewMonth(dt.getMonth())
+    setExpandedDate(iso)
+  }
+
   // Build the month grid: leading blanks for offset + days of month + trailing blanks to fill weeks.
   const monthGrid = useMemo(() => {
     const firstOfMonth = new Date(viewYear, viewMonth, 1)
@@ -274,8 +318,6 @@ export default function Calendar() {
     return cells
   }, [viewYear, viewMonth])
 
-  const isoTodayStr = isoDate(today)
-
   return (
     <ThemedPage
       eyebrow="Demand Calendar"
@@ -293,40 +335,6 @@ export default function Calendar() {
         </button>
       ) : undefined}
     >
-
-      {/* Top controls */}
-      <div className="filters">
-        <select
-          className="filter-select"
-          value={selectedProperty?.id || ''}
-          onChange={e => {
-            const p = properties.find(x => x.id === e.target.value) || null
-            setSelectedProperty(p)
-          }}
-          style={{ minWidth: 240 }}
-        >
-          <option value="" disabled>Select a property…</option>
-          {properties.map(p => (
-            <option key={p.id} value={p.id}>{p.property_name}</option>
-          ))}
-        </select>
-
-        <span style={{ fontSize: 12, color: 'var(--text-faint)', marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          Demand:
-          {[0, 1, 2, 3, 4].map(s => (
-            <span key={s} style={{
-              padding: '2px 9px',
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 600,
-              background: demandColor(s).bg,
-              color: demandColor(s).text,
-            }}>
-              {demandLabel(s)}
-            </span>
-          ))}
-        </span>
-      </div>
 
       {error && <div className="error-msg">{error}</div>}
 
@@ -349,6 +357,90 @@ export default function Calendar() {
                 developer.ticketmaster.com
               </a>
               ). Weather and holidays still work without it.
+            </div>
+          )}
+
+          {/* Action strip — the upcoming dates most worth a rate check */}
+          {currentMonthData && (
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: upcomingHighlights.length ? 12 : 4 }}>
+                <div className="section-title" style={{ marginBottom: 0 }}>Dates worth acting on</div>
+                <span style={{ fontSize: 12, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  Demand:
+                  {[0, 1, 2, 3, 4].map(s => (
+                    <span key={s} style={{
+                      padding: '2px 9px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      background: demandColor(s).bg,
+                      color: demandColor(s).text,
+                    }}>
+                      {demandLabel(s)}
+                    </span>
+                  ))}
+                </span>
+              </div>
+              {upcomingHighlights.length > 0 ? (
+                <>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    {upcomingHighlights.map(d => {
+                      const c = demandColor(d.demand_score)
+                      const dt = new Date(d.date + 'T00:00:00')
+                      return (
+                        <div
+                          key={d.date}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => openHighlight(d.date)}
+                          onKeyDown={e => { if (e.key === 'Enter') openHighlight(d.date) }}
+                          title="Open this day on the calendar"
+                          style={{
+                            flex: '1 1 190px', maxWidth: 280, cursor: 'pointer',
+                            border: '1px solid var(--border)', borderRadius: 12, padding: '10px 14px',
+                            background: 'var(--surface)', transition: 'border-color 0.15s, box-shadow 0.15s',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)' }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none' }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                            <strong style={{ fontSize: 13.5, color: 'var(--ink)', whiteSpace: 'nowrap' }}>
+                              {dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                            </strong>
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700,
+                              textTransform: 'uppercase', letterSpacing: '0.04em',
+                              background: c.bg, color: c.text, whiteSpace: 'nowrap',
+                            }}>
+                              {demandLabel(d.demand_score)}
+                            </span>
+                          </div>
+                          <div style={{
+                            fontSize: 12, color: 'var(--text-muted)', marginTop: 4,
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          }} title={dayDriver(d)}>
+                            {dayDriver(d)}
+                          </div>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={e => { e.stopPropagation(); jumpToRates(d.date) }}
+                            style={{ marginTop: 8, padding: '4px 10px', fontSize: 12 }}
+                          >
+                            Check rates →
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 10 }}>
+                    From the months loaded so far — browse ahead with "Next month" to scan further out.
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  No moderate-or-higher demand dates in the loaded months yet — browse ahead with "Next month" to scan further out.
+                </div>
+              )}
             </div>
           )}
 
@@ -414,47 +506,46 @@ export default function Calendar() {
 
                 if (!cell.inMonth) {
                   return (
-                    <div key={cell.iso + '-out'} style={{ minHeight: 110, padding: 8, background: 'var(--surface)', color: 'var(--border-strong)', fontSize: 12 }}>
+                    <div key={cell.iso + '-out'} style={{ minHeight: isPast ? 44 : 110, padding: 8, background: 'var(--surface)', color: 'var(--border-strong)', fontSize: 12 }}>
                       {cell.dayNum}
                     </div>
                   )
                 }
 
                 if (!day) {
+                  // Past days carry no demand data — render them slim so the
+                  // grid gives its space to the days that matter.
                   return (
                     <div key={cell.iso} style={{
-                      minHeight: 110,
+                      minHeight: isPast ? 44 : 110,
                       padding: 8,
                       background: isPast ? 'var(--surface-2)' : 'var(--surface)',
                       boxShadow: isToday ? 'inset 0 0 0 2px var(--accent)' : 'none',
                       color: 'var(--text-faint)',
                       fontSize: 12,
                     }}>
-                      <div style={{ fontWeight: 600 }}>{cell.dayNum}</div>
-                      <div style={{ fontSize: 10, marginTop: 4 }}>
-                        {isPast ? '(past)' : currentMonthLoading ? '…' : ''}
-                      </div>
+                      <div style={{ fontWeight: 600, opacity: isPast ? 0.55 : 1 }}>{cell.dayNum}</div>
+                      {!isPast && currentMonthLoading && (
+                        <div style={{ fontSize: 10, marginTop: 4 }}>…</div>
+                      )}
                     </div>
                   )
                 }
 
                 const c = demandColor(day.demand_score)
+                const dayClass = `cal-day${isExpanded ? ' cal-day--expanded' : isToday ? ' cal-day--today' : ''}`
                 return (
                   <div
                     key={cell.iso}
+                    className={dayClass}
                     onClick={() => setExpandedDate(isExpanded ? null : cell.iso)}
+                    title="Click for events, weather, and a rate check"
                     style={{
                       minHeight: 110,
                       padding: 8,
                       paddingBottom: 28,
-                      background: 'var(--surface)',
-                      cursor: 'pointer',
+                      background: day.is_weekend ? 'rgba(79,70,229,0.04)' : 'var(--surface)',
                       fontSize: 11,
-                      transition: 'box-shadow 0.1s',
-                      position: 'relative',
-                      boxShadow: isExpanded
-                        ? 'inset 0 0 0 2px var(--accent), var(--shadow-md)'
-                        : isToday ? 'inset 0 0 0 2px var(--accent)' : 'none',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -484,15 +575,26 @@ export default function Calendar() {
                     )}
 
                     {day.event_count > 0 && (() => {
-                      const topImpact = day.events.reduce((max, e) => Math.max(max, e.impact_score), 0)
+                      const top = [...day.events].sort((a, b) => b.impact_score - a.impact_score)[0]
                       return (
-                        <div style={{ marginTop: 4, color: 'var(--text)', fontWeight: 600 }}>
-                          🎟️ {day.event_count} event{day.event_count > 1 ? 's' : ''}
-                          {topImpact >= 2 && (
-                            <span title="Highest event impact on this day">
-                              {' '}{topImpact === 3 ? '🎯' : '✈️'}
-                            </span>
-                          )}
+                        <div style={{ marginTop: 4 }}>
+                          <div style={{ color: 'var(--text)', fontWeight: 600 }}>
+                            🎟️ {day.event_count} event{day.event_count > 1 ? 's' : ''}
+                            {top.impact_score >= 2 && (
+                              <span title="Highest event impact on this day">
+                                {' '}{top.impact_score === 3 ? '🎯' : '✈️'}
+                              </span>
+                            )}
+                          </div>
+                          <div
+                            title={top.name}
+                            style={{
+                              color: 'var(--text-muted)', fontSize: 10, marginTop: 1,
+                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {top.name}
+                          </div>
                         </div>
                       )
                     })()}
