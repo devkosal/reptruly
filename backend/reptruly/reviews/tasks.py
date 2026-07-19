@@ -14,6 +14,9 @@ from reptruly.users.emails import NEGATIVE_SCORE_MAX, send_negative_review_alert
 
 logger = logging.getLogger(__name__)
 
+# Max newly-created reviews auto-tagged per _collect_upserts run (cost control).
+AUTO_TAG_CAP_PER_SYNC = 60
+
 
 def _is_negative(review: Review) -> bool:
     return review.overall_score is not None and review.overall_score <= NEGATIVE_SCORE_MAX
@@ -148,10 +151,28 @@ def _upsert_expedia_review(raw: dict, property_obj: Property) -> tuple[Review, b
 
 
 def _collect_upserts(raw_reviews, upsert, property_obj: Property) -> tuple[int, list[Review]]:
-    """Run ``upsert`` over raw payloads; count successes and gather brand-new
-    negative reviews for the alert email."""
+    """Run ``upsert`` over raw payloads; count successes, gather brand-new
+    negative reviews for the alert email, and stamp reply-SLA transitions."""
+    ids = [
+        pid
+        for pid in (
+            property_obj.booking_hotel_id,
+            property_obj.expedia_property_id,
+            property_obj.google_place_id,
+        )
+        if pid
+    ]
+    # Prior reply state, so we can detect has_reply flipping False -> True
+    # during this sync (reply-SLA data). One query per property per run.
+    prior_replies = (
+        dict(Review.objects.filter(property_id__in=ids).values_list("channex_id", "has_reply"))
+        if ids
+        else {}
+    )
+    now = timezone.now()
     synced = 0
     new_negatives: list[Review] = []
+    created_with_content: list[Review] = []
     for item in raw_reviews:
         result = upsert(item, property_obj)
         if result is None:
@@ -160,6 +181,46 @@ def _collect_upserts(raw_reviews, upsert, property_obj: Property) -> tuple[int, 
         review, created = result
         if created and _is_negative(review):
             new_negatives.append(review)
+        if created and (review.content or "").strip():
+            created_with_content.append(review)
+        if (
+            not created
+            and review.has_reply
+            and prior_replies.get(review.channex_id) is False
+            and review.reply_detected_at is None
+        ):
+            review.reply_detected_at = now
+            review.save(update_fields=["reply_detected_at"])
+
+    # Auto-tag brand-new reviews (fixed taxonomy, gpt-4o-mini). Capped per sync
+    # run so nightly syncs stay cheap; best-effort — a tagging failure must
+    # never fail the sync itself.
+    if created_with_content:
+        to_tag = created_with_content[:AUTO_TAG_CAP_PER_SYNC]
+        skipped = len(created_with_content) - len(to_tag)
+        if skipped:
+            logger.info(
+                "Auto-tagging capped at %d reviews for %s; %d new reviews skipped",
+                AUTO_TAG_CAP_PER_SYNC,
+                property_obj.property_name,
+                skipped,
+            )
+        try:
+            from reptruly.reviews.tagging import classify_reviews  # local import: avoids cycles
+
+            classify_reviews(to_tag)
+        except Exception as exc:
+            logger.warning("Auto-tagging failed during sync: %s", exc)
+
+        # Pre-generate AI reply drafts for the new reviews (Pro plans with
+        # auto-suggest on; capped inside). Same contract as tagging:
+        # best-effort — a drafting failure must never fail the sync itself.
+        try:
+            from reptruly.reviews.reply_drafts import pregenerate_drafts  # local import: avoids cycles
+
+            pregenerate_drafts(created_with_content, property_obj)
+        except Exception as exc:
+            logger.warning("Draft pre-generation failed during sync: %s", exc)
     return synced, new_negatives
 
 
@@ -326,8 +387,12 @@ def sync_reviews_from_booking(self):
     has those IDs set). Renaming the task is avoided because the celery-beat
     schedule references it by dotted path.
     """
+    from reptruly.billing.entitlements import EXPIRED, get_plan
+
     total_synced = 0
-    for prop in Property.objects.exclude(booking_hotel_id="", expedia_property_id="", google_place_id=""):
+    for prop in Property.objects.exclude(booking_hotel_id="", expedia_property_id="", google_place_id="").select_related("user"):
+        if get_plan(prop.user) is EXPIRED:
+            continue  # Starter trial lapsed without upgrading — stop burning API credits
         try:
             total_synced += _sync_property(prop)
         except Exception as exc:

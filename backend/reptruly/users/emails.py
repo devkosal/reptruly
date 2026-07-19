@@ -47,7 +47,8 @@ def send_welcome_email(user: User, origin: str = "") -> None:
         subject="Welcome to reptruly — confirm your email",
         message=(
             f"Hi {name},\n\n"
-            "Your reptruly account is ready.\n\n"
+            "Your reptruly account is ready and your 7-day free trial has "
+            "started.\n\n"
             + confirm_block +
             "Two quick steps and you're live:\n\n"
             "  1. Complete your profile\n"
@@ -244,7 +245,7 @@ def send_trial_ending_email(user: User, amount_cents: int | None, currency: str,
         subject="Your reptruly Pro trial ends in 3 days",
         message=(
             f"Hi {user.name or user.username},\n\n"
-            f"Your 14-day Pro trial ends in 3 days{charge}.\n\n"
+            f"Your Pro trial ends in 3 days{charge}.\n\n"
             "Want to stay? Do nothing — Pro continues uninterrupted.\n"
             "Not for you? Cancel in under a minute from Settings → "
             "Billing & plan → Manage billing, and you won't be charged.\n\n"
@@ -363,4 +364,53 @@ def send_pro_subscription_emails(user: User) -> None:
             "just subscribed to Pro via Stripe Checkout."
         ),
         fail_silently=True,
+    )
+
+
+def send_rate_movement_email(user: User, recipient: str, movements: list[dict]) -> None:
+    """Comp-set price movements (>=10% day-over-snapshot) on upcoming dates.
+
+    One email per user per sync run, covering all their properties.
+    """
+    if not movements:
+        return
+    multi_property = len({m.get("property_name") for m in movements}) > 1
+    lines = []
+    for m in movements:
+        cur = m.get("currency") or "USD"
+        prefix = f"[{m['property_name']}] " if multi_property and m.get("property_name") else ""
+        yours = (
+            f"your rate {_money(m['user_rate'], cur)}"
+            if m.get("user_rate") is not None
+            else "your rate unavailable"
+        )
+        lines.append(
+            f"  • {prefix}{m['checkin']}: comp average "
+            f"{_money(m['old_avg'], cur)} → {_money(m['new_avg'], cur)} "
+            f"({m['pct']:+.0f}%) — {yours}"
+        )
+    count = len(movements)
+    send_mail(
+        subject=(
+            f"Comp-set rates moved on {count} upcoming "
+            f"date{'s' if count != 1 else ''}"
+        ),
+        message=(
+            f"Hi {user.name or user.username},\n\n"
+            "Competitor pricing around your "
+            f"propert{'ies' if multi_property else 'y'} shifted by 10% or "
+            "more since the last daily check:\n\n"
+            + "\n".join(lines)
+            + "\n\nWhen the comp set moves and you don't, you're either "
+            "leaving money on the table or losing bookings on price — review "
+            "these dates on the Rates page.\n\n"
+            "You get this because rate alerts are on in Settings → "
+            "Notifications.\n\n— reptruly alerts"
+        ),
+        from_email=None,
+        recipient_list=[recipient],
+        fail_silently=True,
+    )
+    logger.info(
+        "Rate movement alert sent to %s (%d movements)", recipient, count
     )

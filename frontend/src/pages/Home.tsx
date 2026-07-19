@@ -48,7 +48,7 @@ const FEATURES = [
 
 const STATS = [
   { number: '3', label: 'OTAs connected per property', sub: 'Booking · Expedia · Google' },
-  { number: '<60s', label: 'From paste to first reviews', sub: 'No setup, no API keys' },
+  { number: '1 min', label: 'Setup time', sub: 'Paste a link — reviews start syncing' },
   { number: '24h', label: 'Daily auto-refresh', sub: 'Every channel, every morning' },
   { number: '12mo', label: 'Demand calendar horizon', sub: 'Events · weather · holidays' },
 ]
@@ -227,7 +227,7 @@ export default function Home() {
         overflow: 'hidden',
         marginBottom: 0,
       }}>
-        <div style={{
+        <div className="home-hero-grid" style={{
           position: 'relative', maxWidth: 1280, margin: '0 auto',
           display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 48, alignItems: 'center',
         }}>
@@ -241,7 +241,7 @@ export default function Home() {
             }}>
               {user ? 'Welcome back' : '✨ Hotel intel, simplified'}
             </div>
-            <h1 style={{
+            <h1 className="home-hero-title" style={{
               fontSize: 52, fontWeight: 800, lineHeight: 1.06, marginBottom: 20,
               letterSpacing: '-0.03em', color: 'rgba(255,255,255,0.92)',
             }}>
@@ -262,7 +262,7 @@ export default function Home() {
               ) : (
                 <>
                   <Link to="/login" style={btnPrimary}>
-                    Start free →
+                    Start 7-day free trial →
                   </Link>
                   <Link to="/contact" style={btnGhostDark}>
                     Book a demo
@@ -577,7 +577,7 @@ export default function Home() {
         </p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
           <Link to={user ? '/reviews' : '/login'} style={btnPrimary}>
-            {user ? 'Open Dashboard →' : 'Start free →'}
+            {user ? 'Open Dashboard →' : 'Start 7-day free trial →'}
           </Link>
           <Link to="/contact" style={btnGhostDark}>
             Book a demo
@@ -587,7 +587,7 @@ export default function Home() {
 
       {/* FOOTER — full-bleed ink band */}
       <footer style={{ background: 'var(--ink)', color: 'rgba(255,255,255,0.55)', padding: '48px 32px 24px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-        <div style={{
+        <div className="home-footer-grid" style={{
           maxWidth: 1280, margin: '0 auto',
           display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 32, fontSize: 13,
         }}>

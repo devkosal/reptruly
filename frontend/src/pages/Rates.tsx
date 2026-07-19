@@ -56,6 +56,131 @@ function formatPrice(price: number | null, currency: string): string {
   }
 }
 
+// ---------- Rate history (daily snapshots from the rates sync) ----------
+
+interface RateSnapshotRow {
+  snapshot_date: string
+  checkin: string
+  user_rate: number | null
+  comp_avg: number | null
+  comp_count: number
+  currency: string
+}
+
+interface RateHistoryResponse {
+  property_id: string
+  snapshots: RateSnapshotRow[]
+}
+
+function RateHistoryChart({ rows, currency }: { rows: RateSnapshotRow[]; currency: string }) {
+  const W = 720
+  const H = 200
+  const PAD = { top: 16, right: 16, bottom: 26, left: 8 }
+
+  const values = rows
+    .flatMap(r => [r.user_rate, r.comp_avg])
+    .filter((v): v is number => v !== null)
+  if (values.length === 0) return null
+
+  let min = Math.min(...values)
+  let max = Math.max(...values)
+  if (min === max) {
+    min -= 10
+    max += 10
+  }
+  const headroom = (max - min) * 0.12
+  min -= headroom
+  max += headroom
+
+  const plotW = W - PAD.left - PAD.right
+  const plotH = H - PAD.top - PAD.bottom
+  const x = (i: number) =>
+    rows.length === 1 ? PAD.left + plotW / 2 : PAD.left + (i * plotW) / (rows.length - 1)
+  const y = (v: number) => PAD.top + (1 - (v - min) / (max - min)) * plotH
+
+  const points = (get: (r: RateSnapshotRow) => number | null) =>
+    rows
+      .map((r, i) => {
+        const v = get(r)
+        return v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`
+      })
+      .filter((p): p is string => p !== null)
+      .join(' ')
+
+  const compPoints = points(r => r.comp_avg)
+  const userPoints = points(r => r.user_rate)
+  const first = rows[0]
+  const last = rows[rows.length - 1]
+
+  return (
+    <div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: '100%', height: 'auto', display: 'block' }}
+        role="img"
+        aria-label="Your rate vs comp-set average over time"
+      >
+        <line
+          x1={PAD.left} y1={H - PAD.bottom} x2={W - PAD.right} y2={H - PAD.bottom}
+          stroke="var(--border)" strokeWidth={1}
+        />
+        {compPoints && (
+          <polyline
+            points={compPoints}
+            fill="none"
+            stroke="var(--cyan)"
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        )}
+        {userPoints && (
+          <polyline
+            points={userPoints}
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        )}
+        {rows.map((r, i) => (
+          <g key={r.snapshot_date}>
+            {r.comp_avg !== null && (
+              <circle cx={x(i)} cy={y(r.comp_avg)} r={3} fill="var(--cyan)">
+                <title>{`${r.snapshot_date} — comp avg ${formatPrice(r.comp_avg, currency)} (${r.comp_count} hotels)`}</title>
+              </circle>
+            )}
+            {r.user_rate !== null && (
+              <circle cx={x(i)} cy={y(r.user_rate)} r={3} fill="var(--accent)">
+                <title>{`${r.snapshot_date} — your rate ${formatPrice(r.user_rate, currency)}`}</title>
+              </circle>
+            )}
+          </g>
+        ))}
+        <text x={PAD.left} y={H - 8} fontSize={11} fill="var(--text-faint)">
+          {first.snapshot_date}
+        </text>
+        {rows.length > 1 && (
+          <text x={W - PAD.right} y={H - 8} fontSize={11} fill="var(--text-faint)" textAnchor="end">
+            {last.snapshot_date}
+          </text>
+        )}
+      </svg>
+      <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 14, height: 3, borderRadius: 2, background: 'var(--accent)' }} />
+          Your rate{last.user_rate !== null && <strong style={{ color: 'var(--text)' }}> {formatPrice(last.user_rate, currency)}</strong>}
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ width: 14, height: 3, borderRadius: 2, background: 'var(--cyan)' }} />
+          Comp-set average{last.comp_avg !== null && <strong style={{ color: 'var(--text)' }}> {formatPrice(last.comp_avg, currency)}</strong>}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 // ---------- Bucket definitions ----------
 
 type StarBucket = '1' | '2' | '3' | '4' | '5' | 'unrated'
@@ -270,6 +395,7 @@ export default function Rates() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [upgradeMsg, setUpgradeMsg] = useState('')
+  const [history, setHistory] = useState<RateSnapshotRow[]>([])
 
   // null = "not yet defaulted for this dataset"; once data lands we seed defaults.
   const [starFilter, setStarFilter] = useState<Set<StarBucket> | null>(null)
@@ -355,6 +481,26 @@ export default function Rates() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProperty?.id, checkin, checkout, adults])
 
+  // Rate history snapshots (written by the daily rates sync)
+  useEffect(() => {
+    if (!selectedProperty) {
+      setHistory([])
+      return
+    }
+    let cancelled = false
+    fetch(`/api/rates-history/${selectedProperty.id}`, { credentials: 'include' })
+      .then(res => (res.ok ? (res.json() as Promise<RateHistoryResponse>) : null))
+      .then(json => {
+        if (!cancelled) setHistory(json?.snapshots ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setHistory([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedProperty?.id])
+
   // Apply all filters; the user's own property is always included regardless of filters.
   const filteredCompetitors = data
     ? data.competitors.filter(c => {
@@ -390,6 +536,26 @@ export default function Rates() {
     if (pct > 10) return { label: 'Above market', color: 'var(--bad)', chip: 'chip-bad' }
     return { label: 'On par with market', color: 'var(--accent)', chip: 'chip-accent' }
   })()
+
+  // History for the tracked check-in matching the selected stay: prefer a
+  // tracked check-in inside [checkin, checkout), else the nearest one.
+  const trackedCheckins = Array.from(new Set(history.map(h => h.checkin))).sort()
+  const inRange = trackedCheckins.filter(c => c >= checkin && c < checkout)
+  const historyCheckin =
+    inRange[0] ??
+    (trackedCheckins.length
+      ? trackedCheckins.reduce((best, c) =>
+          Math.abs(new Date(c).getTime() - new Date(checkin).getTime()) <
+          Math.abs(new Date(best).getTime() - new Date(checkin).getTime())
+            ? c
+            : best
+        )
+      : null)
+  const historyRows = historyCheckin
+    ? history
+        .filter(h => h.checkin === historyCheckin)
+        .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
+    : []
 
   return (
     <ThemedPage
@@ -554,7 +720,7 @@ export default function Rates() {
           </div>
 
           {/* Comp set table */}
-          <div className="table-wrapper">
+          <div className="table-wrapper table-scroll">
             <table>
               <thead>
                 <tr>
@@ -615,6 +781,27 @@ export default function Rates() {
             at each hotel for {adults} adult{adults > 1 ? 's' : ''}, 1 room.
           </p>
         </>
+      )}
+      {selectedProperty && !upgradeMsg && (
+        <div className="card" style={{ marginTop: 18 }}>
+          <div className="section-title">Rate history</div>
+          {historyRows.length > 0 ? (
+            <>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 12px' }}>
+                Daily snapshots of your rate vs. the comp-set average for check-in{' '}
+                <strong style={{ color: 'var(--text)' }}>{historyCheckin}</strong> (1 night).
+              </p>
+              <RateHistoryChart
+                rows={historyRows}
+                currency={historyRows[historyRows.length - 1].currency || data?.currency || 'USD'}
+              />
+            </>
+          ) : (
+            <div className="empty-state">
+              <p>History builds up as daily rate syncs run.</p>
+            </div>
+          )}
+        </div>
       )}
       <SyncFooter domain="rates" />
     </ThemedPage>

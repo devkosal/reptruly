@@ -9,6 +9,7 @@ import {
 import {
   fetchNotificationSettings, updateNotificationSettings,
 } from '../api/notifications'
+import { fetchReplyPrefs, updateReplyPrefs } from '../api/replyPrefs'
 import ThemedPage from '../components/ThemedPage'
 import { useAuth } from '../context/AuthContext'
 import { useProperty } from '../context/PropertyContext'
@@ -39,9 +40,6 @@ interface SettingsState {
     sync_frequency: 'realtime' | 'hourly' | '6h' | 'daily'
     compact_density: boolean
   }
-  security: {
-    two_factor: boolean
-  }
 }
 
 const DEFAULT_SETTINGS: SettingsState = {
@@ -69,9 +67,6 @@ const DEFAULT_SETTINGS: SettingsState = {
     date_format: '12h',
     sync_frequency: 'daily',
     compact_density: false,
-  },
-  security: {
-    two_factor: false,
   },
 }
 
@@ -136,7 +131,6 @@ function loadSettings(): SettingsState {
       notifications: { ...DEFAULT_SETTINGS.notifications, ...(parsed.notifications || {}) },
       reply: { ...DEFAULT_SETTINGS.reply, ...(parsed.reply || {}) },
       workspace: { ...DEFAULT_SETTINGS.workspace, ...(parsed.workspace || {}) },
-      security: { ...DEFAULT_SETTINGS.security, ...(parsed.security || {}) },
     }
     // Old default of 'hourly' didn't reflect reality — backend syncs daily.
     // Snap legacy values to 'daily' on read.
@@ -281,11 +275,12 @@ function ChipGroup<T extends string>({ value, options, onChange }: {
 // ---------- Main page ----------
 
 export default function Settings() {
-  const { user, logout } = useAuth()
+  const { user } = useAuth()
   const [settings, setSettings] = useState<SettingsState>(loadSettings)
   const [savedFlash, setSavedFlash] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [notifLoaded, setNotifLoaded] = useState(false)
+  const [replyLoaded, setReplyLoaded] = useState(false)
 
   // Auto-save on any change, with a tiny "Saved" flash.
   useEffect(() => {
@@ -313,6 +308,38 @@ export default function Settings() {
     }, 400)
     return () => clearTimeout(t)
   }, [settings.notifications, notifLoaded])
+
+  // Reply Studio prefs also live server-side (they drive pre-generated AI
+  // drafts during syncs) — same load-then-persist pattern as notifications.
+  // localStorage stays as a fallback for Reviews.tsx.
+  useEffect(() => {
+    fetchReplyPrefs()
+      .then(data => {
+        if (data) {
+          setSettings(s => ({
+            ...s,
+            reply: {
+              ...s.reply,
+              tone: (data.tone as SettingsState['reply']['tone']) || s.reply.tone,
+              language: data.language || s.reply.language,
+              signature: data.signature,
+              auto_suggest: data.auto_suggest,
+            },
+          }))
+        }
+      })
+      .catch(() => {})
+      .finally(() => setReplyLoaded(true))
+  }, [])
+
+  useEffect(() => {
+    if (!replyLoaded) return
+    const t = setTimeout(() => {
+      const { tone, language, signature, auto_suggest } = settings.reply
+      updateReplyPrefs({ tone, language, signature, auto_suggest }).catch(() => {})
+    }, 400)
+    return () => clearTimeout(t)
+  }, [settings.reply, replyLoaded])
 
   const browserTz = useMemo(() => {
     try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return '' }
@@ -357,6 +384,8 @@ export default function Settings() {
         <BillingSection />
 
         <BadgeSection />
+
+        <ApiKeysSection />
 
         {/* Notifications */}
         <Section
@@ -548,37 +577,7 @@ export default function Settings() {
         <ManualSyncSection />
 
         {/* Security */}
-        <Section
-          title="Security"
-          description="Keep your account safe."
-        >
-          <ToggleRow
-            label="Two-factor authentication"
-            description="Require a one-time code from an authenticator app at sign-in."
-            checked={settings.security.two_factor}
-            onChange={v => patch('security', { two_factor: v })}
-            badge="Recommended"
-          />
-          <ActionRow
-            label="Change password"
-            description="Last changed: a while ago."
-            buttonLabel="Update"
-            onClick={() => alert('Password change flow coming soon.')}
-          />
-          <ActionRow
-            label="Active sessions"
-            description="See devices currently signed in to your account."
-            buttonLabel="Manage"
-            onClick={() => alert('Session manager coming soon.')}
-          />
-          <ActionRow
-            label="Sign out everywhere"
-            description="Revoke every active session and force re-login on all devices."
-            buttonLabel="Sign out all"
-            danger
-            onClick={() => { if (confirm('Sign out of all devices?')) logout() }}
-          />
-        </Section>
+        <SecuritySection />
 
         {/* Data & privacy */}
         <Section
@@ -651,6 +650,150 @@ export default function Settings() {
     </ThemedPage>
   )
 }
+
+interface ApiKeyRow {
+  prefix: string
+  label: string
+  created_at: string | null
+  expires_at: string | null
+  revoked: boolean
+}
+
+function ApiKeysSection() {
+  const [keys, setKeys] = useState<ApiKeyRow[] | null>(null)
+  const [label, setLabel] = useState('')
+  const [newKey, setNewKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/keys', { credentials: 'include' })
+      if (res.ok) setKeys(await res.json())
+    } catch { /* section stays in loading state; retry on next visit */ }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  async function createKey() {
+    if (!label.trim()) return
+    setBusy(true)
+    setError('')
+    try {
+      const res = await fetch('/api/keys', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: label.trim() }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.detail || body.message || `Failed (${res.status})`)
+      }
+      const data = await res.json()
+      setNewKey(data.key)
+      setLabel('')
+      await load()
+    } catch (e: any) {
+      setError(e.message || 'Could not create key')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function revoke(prefix: string) {
+    if (!confirm(`Revoke API key ${prefix}…? Requests using it will stop working immediately.`)) return
+    setError('')
+    try {
+      const res = await fetch(`/api/keys/${encodeURIComponent(prefix)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      if (!res.ok) throw new Error(`Failed (${res.status})`)
+      await load()
+    } catch (e: any) {
+      setError(e.message || 'Could not revoke key')
+    }
+  }
+
+  const active = (keys || []).filter(k => !k.revoked)
+
+  return (
+    <Section
+      title="API keys"
+      description="Programmatic read access to your properties, reviews, and analytics. Send the key in an X-API-Key header."
+    >
+      {newKey && (
+        <div style={{
+          background: 'var(--good-soft)', border: '1px solid #c4ebda', borderRadius: 10,
+          padding: '12px 14px', marginBottom: 14,
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--good)', marginBottom: 6 }}>
+            Key created — copy it now, it won't be shown again
+          </div>
+          <code style={{
+            display: 'block', fontSize: 12, padding: '8px 10px', borderRadius: 8,
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            wordBreak: 'break-all', userSelect: 'all',
+          }}>
+            {newKey}
+          </code>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            style={{ marginTop: 8 }}
+            onClick={() => { navigator.clipboard?.writeText(newKey).catch(() => {}); setNewKey('') }}
+          >
+            Copy & dismiss
+          </button>
+        </div>
+      )}
+
+      {active.length > 0 ? (
+        active.map(k => (
+          <div key={k.prefix} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 0', borderBottom: '1px solid var(--border)', gap: 12,
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{k.label || 'Unnamed key'}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                {k.prefix}…{k.created_at ? ` · created ${new Date(k.created_at).toLocaleDateString()}` : ''}
+              </div>
+            </div>
+            <button type="button" className="btn btn-danger btn-sm" onClick={() => revoke(k.prefix)}>
+              Revoke
+            </button>
+          </div>
+        ))
+      ) : keys !== null ? (
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 12px' }}>
+          No API keys yet.
+        </p>
+      ) : null}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+        <input
+          className="filter-input"
+          placeholder="Key label (e.g. Reporting script)"
+          value={label}
+          onChange={e => setLabel(e.target.value)}
+          style={{ flex: 1, minWidth: 200 }}
+        />
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          onClick={createKey}
+          disabled={busy || !label.trim()}
+        >
+          {busy ? 'Creating…' : 'Create key'}
+        </button>
+      </div>
+      {error && <div style={{ fontSize: 12, color: 'var(--bad)', marginTop: 8 }}>{error}</div>}
+    </Section>
+  )
+}
+
 
 function BadgeSection() {
   const { properties } = useProperty()
@@ -849,10 +992,24 @@ function BillingSection() {
               {loading ? 'Loading plan…' : `${status?.plan ?? 'Starter'} plan`}
             </span>
             <span
-              className={hasPro ? 'chip chip-accent' : 'chip'}
+              className={
+                hasPro
+                  ? 'chip chip-accent'
+                  : status?.plan === 'Trial ended'
+                    ? 'chip chip-warn'
+                    : 'chip'
+              }
               style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', padding: '2px 8px' }}
             >
-              {loading ? '…' : status?.trialing ? 'Trial' : hasPro ? 'Active' : 'Free'}
+              {loading
+                ? '…'
+                : status?.trialing
+                  ? 'Trial'
+                  : hasPro
+                    ? 'Active'
+                    : status?.plan === 'Trial ended'
+                      ? 'Trial ended'
+                      : 'Free trial'}
             </span>
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.5 }}>
@@ -862,12 +1019,14 @@ function BillingSection() {
                 ? [
                     status ? formatPrice(status) : '',
                     status?.trialing && status.trial_end
-                      ? `free trial ends ${new Date(status.trial_end).toLocaleDateString()}${status.cancel_at_period_end ? ', then cancels' : ', then billing starts'}`
+                      ? `trial ends ${new Date(status.trial_end).toLocaleDateString()}${status.cancel_at_period_end ? ', then cancels' : ', then billing starts'}`
                       : status?.current_period_end
                         ? `${status.cancel_at_period_end ? 'ends' : 'renews'} ${new Date(status.current_period_end).toLocaleDateString()}`
                         : '',
                   ].filter(Boolean).join(' · ')
-                : '1 property, Booking.com sync, daily refresh. Upgrade for all OTAs + AI insights.'}
+                : status?.plan === 'Trial ended'
+                  ? 'Your 7-day free trial has ended. Upgrade to Pro to keep syncing reviews and unlock all features.'
+                  : `Free trial — ${status?.trial_days_left ?? 7} day${(status?.trial_days_left ?? 7) !== 1 ? 's' : ''} left. 1 property, Booking.com sync, daily refresh.`}
           </div>
         </div>
         <button
@@ -877,13 +1036,7 @@ function BillingSection() {
           disabled={busy || loading}
           style={{ flexShrink: 0, cursor: busy ? 'wait' : undefined }}
         >
-          {busy
-            ? 'Redirecting…'
-            : hasPro
-              ? 'Manage billing'
-              : status?.trial_eligible
-                ? 'Start 14-day free trial'
-                : 'Upgrade to Pro'}
+          {busy ? 'Redirecting…' : hasPro ? 'Manage billing' : 'Upgrade to Pro'}
         </button>
       </div>
 
@@ -937,8 +1090,10 @@ function ManualSyncSection() {
 
   async function runAll() {
     setError('')
-    const domains: SyncDomain[] = ['reviews', 'rates', 'calendar', 'analytics']
-    setBusy({ reviews: true, rates: true, calendar: true, analytics: true })
+    // Only reviews + rates have real scheduled syncs; calendar/analytics
+    // compute on demand.
+    const domains: SyncDomain[] = ['reviews', 'rates']
+    setBusy({ reviews: true, rates: true, calendar: false, analytics: false })
     try {
       await Promise.all(domains.map(d => triggerSync(d)))
       await load()
@@ -955,21 +1110,21 @@ function ManualSyncSection() {
     return map as Record<SyncDomain, SyncStatusRow | undefined>
   }, [rows])
 
-  const domains: Array<{ key: SyncDomain; label: string }> = [
+  const domains: Array<{ key: SyncDomain; label: string; onDemand?: boolean }> = [
     { key: 'reviews',   label: 'Reviews' },
     { key: 'rates',     label: 'Rates' },
-    { key: 'calendar',  label: 'Calendar' },
-    { key: 'analytics', label: 'Analytics' },
+    { key: 'calendar',  label: 'Calendar',  onDemand: true },
+    { key: 'analytics', label: 'Analytics', onDemand: true },
   ]
 
   return (
     <Section
       title="Manual sync"
-      description="Force a refresh now. All four normally sync once a day at 03:00 UTC."
+      description="Reviews and rates sync once a day at 03:00 UTC. Calendar and analytics compute on demand with a 24-hour cache."
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          Trigger an individual refresh, or fire all four at once.
+          Trigger an individual refresh, or fire both syncs at once.
         </div>
         <button
           type="button"
@@ -981,7 +1136,7 @@ function ManualSyncSection() {
         </button>
       </div>
 
-      {domains.map(d => {
+      {domains.filter(d => !d.onDemand).map(d => {
         const row = byDomain[d.key]
         const running = row?.status === 'running' || busy[d.key]
         const failed = row?.status === 'failed'
@@ -1032,6 +1187,25 @@ function ManualSyncSection() {
           </div>
         )
       })}
+      {domains.filter(d => d.onDemand).map(d => (
+        <div key={d.key} style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 0', borderBottom: '1px solid var(--border)', gap: 16,
+        }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{d.label}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Computed on demand · cached 24h
+              </span>
+            </div>
+          </div>
+          <span className="chip" style={{ flexShrink: 0, fontSize: 11 }}>
+            Refresh from its page
+          </span>
+        </div>
+      ))}
       {error && (
         <div style={{ fontSize: 12, color: 'var(--bad)', marginTop: 8 }}>{error}</div>
       )}
@@ -1174,5 +1348,163 @@ function ActionRow({ label, description, buttonLabel, onClick, danger }: {
         {buttonLabel}
       </button>
     </div>
+  )
+}
+
+function SecuritySection() {
+  const [sessionCount, setSessionCount] = useState<number | null>(null)
+  const [pwOpen, setPwOpen] = useState(false)
+  const [currentPw, setCurrentPw] = useState('')
+  const [newPw, setNewPw] = useState('')
+  const [confirmPw, setConfirmPw] = useState('')
+  const [pwError, setPwError] = useState('')
+  const [pwSuccess, setPwSuccess] = useState(false)
+  const [pwSaving, setPwSaving] = useState(false)
+  const [signOutMsg, setSignOutMsg] = useState('')
+
+  useEffect(() => {
+    fetch('/api/auth/sessions', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => { if (data) setSessionCount(data.active_sessions) })
+      .catch(() => {})
+  }, [])
+
+  function closePasswordForm() {
+    setPwOpen(false)
+    setCurrentPw(''); setNewPw(''); setConfirmPw('')
+    setPwError('')
+  }
+
+  async function submitPassword() {
+    setPwError('')
+    if (!currentPw || !newPw) { setPwError('All fields are required'); return }
+    if (newPw !== confirmPw) { setPwError('New passwords do not match'); return }
+    if (newPw.length < 8) { setPwError('New password must be at least 8 characters'); return }
+    setPwSaving(true)
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
+      })
+      if (res.ok) {
+        closePasswordForm()
+        setPwSuccess(true)
+        setTimeout(() => setPwSuccess(false), 4000)
+      } else {
+        const body = await res.json().catch(() => null)
+        setPwError(body?.detail || 'Could not update password')
+      }
+    } catch {
+      setPwError('Network error — try again')
+    } finally {
+      setPwSaving(false)
+    }
+  }
+
+  async function signOutEverywhere() {
+    if (!confirm('Sign out of all other devices?')) return
+    try {
+      const res = await fetch('/api/auth/logout-everywhere', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setSignOutMsg(`✓ Signed out ${data.revoked} other device${data.revoked === 1 ? '' : 's'}`)
+        setSessionCount(1)
+      }
+    } catch { /* network hiccup — leave the row as-is */ }
+  }
+
+  const inputStyle = { width: '100%', marginBottom: 8 }
+
+  return (
+    <Section title="Security" description="Keep your account safe.">
+      {/* Change password */}
+      <div style={{ padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Change password</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
+              {pwSuccess ? '✓ Password updated' : 'Use at least 8 characters.'}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            style={{ flexShrink: 0 }}
+            onClick={() => (pwOpen ? closePasswordForm() : setPwOpen(true))}
+          >
+            {pwOpen ? 'Cancel' : 'Update'}
+          </button>
+        </div>
+        {pwOpen && (
+          <form
+            onSubmit={e => { e.preventDefault(); submitPassword() }}
+            style={{ marginTop: 12, maxWidth: 360 }}
+          >
+            <input
+              type="password"
+              className="filter-input"
+              style={inputStyle}
+              placeholder="Current password"
+              autoComplete="current-password"
+              value={currentPw}
+              onChange={e => setCurrentPw(e.target.value)}
+            />
+            <input
+              type="password"
+              className="filter-input"
+              style={inputStyle}
+              placeholder="New password (min 8 characters)"
+              autoComplete="new-password"
+              value={newPw}
+              onChange={e => setNewPw(e.target.value)}
+            />
+            <input
+              type="password"
+              className="filter-input"
+              style={inputStyle}
+              placeholder="Confirm new password"
+              autoComplete="new-password"
+              value={confirmPw}
+              onChange={e => setConfirmPw(e.target.value)}
+            />
+            {pwError && (
+              <div style={{ fontSize: 12, color: 'var(--bad)', marginBottom: 8 }}>{pwError}</div>
+            )}
+            <button type="submit" className="btn btn-primary btn-sm" disabled={pwSaving}>
+              {pwSaving ? 'Saving…' : 'Save new password'}
+            </button>
+          </form>
+        )}
+      </div>
+
+      {/* Active sessions */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 0', borderBottom: '1px solid var(--border)', gap: 16,
+      }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Active sessions</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
+            {sessionCount === null
+              ? 'Checking…'
+              : `${sessionCount} active session${sessionCount === 1 ? '' : 's'}`}
+          </div>
+        </div>
+      </div>
+
+      {/* Sign out everywhere */}
+      <ActionRow
+        label="Sign out everywhere"
+        description={signOutMsg || 'Revoke every other active session and force re-login on those devices.'}
+        buttonLabel="Sign out all"
+        danger
+        onClick={signOutEverywhere}
+      />
+    </Section>
   )
 }

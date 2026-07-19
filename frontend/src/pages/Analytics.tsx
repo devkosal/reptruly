@@ -1052,7 +1052,7 @@ export default function Analytics() {
         : 'Aggregated insights across all properties'}
     >
       <PropertyAnalytics propertyName={selectedProperty?.property_name ?? null} />
-      <SyncFooter domain="analytics" />
+      <SyncFooter domain="analytics" onDemand />
     </ThemedPage>
   )
 }

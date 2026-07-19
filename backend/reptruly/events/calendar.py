@@ -30,16 +30,39 @@ def _calendar_cache_key(property_id: UUID, start: str, end: str, radius: int) ->
     return f"calendar:v2:{property_id}:{start}:{end}:{radius}"
 
 
+# OTA metadata reports full country names; the holidays lib wants ISO codes.
+_COUNTRY_CODES = {
+    "UNITED STATES": "US", "USA": "US",
+    "UNITED KINGDOM": "GB", "UK": "GB", "ENGLAND": "GB", "SCOTLAND": "GB", "WALES": "GB",
+    "CANADA": "CA", "MEXICO": "MX", "BRAZIL": "BR", "ARGENTINA": "AR",
+    "FRANCE": "FR", "GERMANY": "DE", "SPAIN": "ES", "ITALY": "IT",
+    "PORTUGAL": "PT", "NETHERLANDS": "NL", "BELGIUM": "BE", "SWITZERLAND": "CH",
+    "AUSTRIA": "AT", "IRELAND": "IE", "GREECE": "GR", "TURKEY": "TR", "TÜRKIYE": "TR",
+    "POLAND": "PL", "CZECH REPUBLIC": "CZ", "CZECHIA": "CZ", "SWEDEN": "SE",
+    "NORWAY": "NO", "DENMARK": "DK", "FINLAND": "FI",
+    "INDIA": "IN", "CHINA": "CN", "JAPAN": "JP", "SOUTH KOREA": "KR",
+    "THAILAND": "TH", "VIETNAM": "VN", "INDONESIA": "ID", "MALAYSIA": "MY",
+    "SINGAPORE": "SG", "PHILIPPINES": "PH", "UNITED ARAB EMIRATES": "AE",
+    "SAUDI ARABIA": "SA", "ISRAEL": "IL", "EGYPT": "EG", "MOROCCO": "MA",
+    "SOUTH AFRICA": "ZA", "KENYA": "KE", "NIGERIA": "NG",
+    "AUSTRALIA": "AU", "NEW ZEALAND": "NZ",
+}
+
+
 def _country_for_property(prop: Property) -> str:
     """Best-effort country code lookup. Defaults to 'US' if we can't tell."""
+    # Preferred: the country the OTA reported at connect time.
+    stored = (prop.country or "").strip().upper()
+    if len(stored) == 2:
+        return stored
+    if stored in _COUNTRY_CODES:
+        return _COUNTRY_CODES[stored]
+
+    # Legacy fallback: substring-match the location string.
     loc = (prop.location or "").upper()
-    # Common cases: location is like "ADDR, CITY, United States" or contains a country tail.
-    if any(x in loc for x in [", USA", ", UNITED STATES", ", US"]):
-        return "US"
-    if any(x in loc for x in [", UK", ", UNITED KINGDOM"]):
-        return "GB"
-    if ", CANADA" in loc:
-        return "CA"
+    for name, code in _COUNTRY_CODES.items():
+        if f", {name}" in loc:
+            return code
     return "US"
 
 

@@ -104,6 +104,22 @@ class Preferences(UUIDModel):
     notify_rate_changes = BooleanField(_("Rate movement alerts"), default=True)
     notify_sync_failures = BooleanField(_("Sync failure alerts"), default=True)
 
+    # Reply Studio preferences — drive AI reply drafting defaults, both for the
+    # on-demand endpoint and pre-generated drafts written during review syncs.
+    reply_tone = CharField(
+        _("Default reply tone"),
+        max_length=16,
+        default="warm",
+        help_text="professional | warm | concise | playful",
+    )
+    reply_language = CharField(_("Default reply language"), max_length=8, default="en")
+    reply_signature = CharField(_("Reply signature"), max_length=255, blank=True)
+    reply_auto_suggest = BooleanField(
+        _("Pre-generate reply drafts"),
+        default=True,
+        help_text="Draft AI replies automatically for new reviews (Pro plans).",
+    )
+
     @property
     def alert_recipient(self) -> str:
         return self.alert_email or self.user.email

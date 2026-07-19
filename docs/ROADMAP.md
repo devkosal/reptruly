@@ -1,5 +1,23 @@
 # reptruly — Product Audit & Prioritized Roadmap
 
+> **Status update (2026-07-13):** Nearly everything below has shipped since the
+> audit. DONE: all of P0 (entitlements, webhooks incl. dunning emails, phantom
+> task, marketing truth-pass, review scoping, per-property quantity billing);
+> P1.1 email notifications (negative alerts, daily digest, weekly summary,
+> monthly owner reports, demand-based + comp-movement rate alerts);
+> P1.2 server-side prefs (notifications + reply prefs); P1.3 rate history
+> (RateSnapshot + daily sync + history chart + movement alerts); P1.4 Reply
+> Studio (templates, pre-generated drafts stored on reviews); P1.5 country on
+> Property; P1.6 honest sync status; P2.1 CSV export; P2.2 auto-tags (+ derived
+> sentiment); P2.3 reply-SLA capture (reply_detected_at accruing); P2.4 account
+> security (password change, sessions, email verification; 2FA toggle removed);
+> P2.5 annual + per-property billing; P2.6 public read API with API keys.
+> Also shipped beyond the audit: 7-day Starter trial with server-side expiry
+> (replaces free-forever), embeddable review badge, mobile responsiveness.
+> REMAINING: hourly Pro sync (P0.2 — descoped, marketing no longer claims it),
+> OTA reply write-back (Channex pilot), additional channels (Airbnb/Vrbo/
+> TripAdvisor), auto-send 5★ replies, per-property permissions (MPR pill).
+
 _Audit date: 2026-07-05. Read-only audit of `backend/` (Django + django-ninja) and `frontend/` (React SPA)._
 
 ---

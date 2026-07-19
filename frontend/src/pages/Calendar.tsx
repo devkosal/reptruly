@@ -353,7 +353,7 @@ export default function Calendar() {
           )}
 
           {/* Month card: nav header + weekday header + day grid */}
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="card calendar-month-card" style={{ padding: 0, overflow: 'hidden' }}>
             {/* Month navigation header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
               <button
@@ -388,7 +388,7 @@ export default function Calendar() {
             </div>
 
             {/* Weekday headers */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
+            <div className="cal-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
               {WEEKDAY_LABELS.map(w => (
                 <div key={w} style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.07em', textAlign: 'center', padding: '8px 0' }}>
                   {w}
@@ -397,7 +397,7 @@ export default function Calendar() {
             </div>
 
             {/* Day cells — white cells separated by 1px hairlines (grid gap over --border) */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, background: 'var(--border)', position: 'relative', minHeight: 200 }}>
+            <div className="cal-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, background: 'var(--border)', position: 'relative', minHeight: 200 }}>
               {!currentMonthData && currentMonthLoading && (
                 <div style={{
                   position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -615,7 +615,7 @@ export default function Calendar() {
           )}
         </>
       )}
-      <SyncFooter domain="calendar" />
+      <SyncFooter domain="calendar" onDemand />
     </ThemedPage>
   )
 }

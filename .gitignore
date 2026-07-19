@@ -301,3 +301,4 @@ reptruly/media/
 /*.png
 .playwright-mcp/
 .claude/
+/*.jpeg

@@ -82,6 +82,13 @@ class SyncAPI:
         _ensure_authenticated(request)
         if domain not in VALID_DOMAINS:
             raise HttpError(404, f"Unknown sync domain: {domain}")
-        task = DOMAIN_TO_TASK[domain]
+        task = DOMAIN_TO_TASK.get(domain)
+        if task is None:
+            # Calendar/analytics compute on demand (24h caches) — nothing to sync.
+            raise HttpError(
+                400,
+                f"The {domain} data refreshes on demand — use the refresh "
+                "controls on its page instead.",
+            )
         async_result = task.delay()
         return {"domain": domain, "queued": True, "task_id": str(async_result.id)}

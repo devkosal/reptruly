@@ -92,6 +92,7 @@ class ReviewsAPI:
         max_score=None,
         from_date=None,
         to_date=None,
+        tag=None,
     ):
         if search:
             qs = qs.filter(content__icontains=search)
@@ -109,6 +110,9 @@ class ReviewsAPI:
             qs = qs.filter(reviewed_at__date__gte=from_date)
         if to_date is not None:
             qs = qs.filter(reviewed_at__date__lte=to_date)
+        if tag:
+            # tags is a JSON list; __contains=[tag] matches membership.
+            qs = qs.filter(tags__contains=[tag])
         return qs
 
     @http_get("", response={200: ReviewListOut})
@@ -126,6 +130,7 @@ class ReviewsAPI:
         search: Optional[str] = None,
         from_date: Optional[date] = None,
         to_date: Optional[date] = None,
+        tag: Optional[str] = None,
     ):
         """List reviews stored locally, with optional filters."""
         qs = self._apply_filters(
@@ -138,6 +143,7 @@ class ReviewsAPI:
             max_score=max_score,
             from_date=from_date,
             to_date=to_date,
+            tag=tag,
         )
 
         # Per-OTA counts reflect every filter EXCEPT the OTA selection, so chips stay
@@ -253,85 +259,26 @@ class ReviewsAPI:
             return 404, {"message": "Review not found"}
 
         from django.conf import settings
-        from openai import OpenAI
+
+        from reptruly.reviews.reply_drafts import generate_reply_draft
 
         if not getattr(settings, "OPENAI_API_KEY", ""):
             return 502, {"message": "OPENAI_API_KEY not configured on the backend."}
 
-        tone_descriptions = {
-            "professional": "formal, respectful, businesslike — appropriate for corporate clientele",
-            "warm": "friendly, personable, sincere — a real human voice with warmth",
-            "concise": "brief and direct, no fluff, gets to the point",
-            "playful": "light, conversational, can use a friendly emoji or two",
-        }
         tone = (payload.tone or "warm").lower()
-        tone_desc = tone_descriptions.get(tone, tone_descriptions["warm"])
-
-        language_names = {
-            "en": "English", "es": "Spanish", "fr": "French", "de": "German",
-            "it": "Italian", "pt": "Portuguese", "nl": "Dutch", "ja": "Japanese",
-            "zh": "Chinese", "ko": "Korean", "ar": "Arabic", "hi": "Hindi",
-            "th": "Thai", "tr": "Turkish", "ru": "Russian",
-        }
-        lang = language_names.get((payload.language or "en").lower(), "English")
-
-        score = review.overall_score
-        reviewer = review.reviewer_name or "the guest"
-        if score is not None:
-            sentiment_guidance = (
-                "This is a negative review. Acknowledge the specific issue they raised, "
-                "apologize sincerely (without being defensive or making excuses), and invite "
-                "them to contact the hotel directly to make it right."
-                if score < 6
-                else "This is a positive review. Thank them warmly, reference something specific "
-                "they mentioned, and invite them back."
-                if score >= 8
-                else "This is a mixed review. Acknowledge what they liked, address what they "
-                "didn't, and be honest about it."
-            )
-        else:
-            sentiment_guidance = (
-                "Respond appropriately to the tone and content of the review."
-            )
-
-        signature_instruction = (
-            f"End with this signature on its own line:\n{payload.signature.strip()}"
-            if payload.signature.strip()
-            else "End with a generic friendly closing — no fake hotel manager name."
-        )
-
-        prompt = (
-            "You are drafting a reply from a hotel manager to a guest review.\n\n"
-            f"OTA: {review.ota_name}\n"
-            f"Property: {review.property_name}\n"
-            f"Reviewer: {reviewer}\n"
-            f"Rating: {score if score is not None else 'not provided'}/10\n"
-            f"Review content:\n{review.content or '(no text)'}\n\n"
-            "REPLY REQUIREMENTS:\n"
-            f"- Tone: {tone} ({tone_desc})\n"
-            f"- Language: write the reply entirely in {lang}\n"
-            "- Length: 2-4 sentences\n"
-            f"- {sentiment_guidance}\n"
-            "- Address the reviewer by first name if available\n"
-            "- Be specific to what they mentioned — never generic boilerplate\n"
-            "- Don't make promises you can't keep\n"
-            "- Don't be sycophantic or over-the-top\n"
-            f"- {signature_instruction}\n\n"
-            "Output the reply text only — no preamble, no headers, no quotes around it."
-        )
-
         try:
-            client = OpenAI(api_key=settings.OPENAI_API_KEY)
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=400,
-                temperature=0.7,
+            draft = generate_reply_draft(
+                review, tone, payload.language or "en", payload.signature
             )
-            draft = (resp.choices[0].message.content or "").strip()
         except Exception as exc:
             logger.error("Draft reply generation failed: %s", exc)
             return 502, {"message": f"Could not generate draft: {exc}"}
+
+        # Persist the draft on the review so the list pre-fills it instantly
+        # next time (and regenerations replace the stored copy).
+        review.draft_reply = draft
+        review.draft_generated_at = timezone.now()
+        review.save(update_fields=["draft_reply", "draft_generated_at"])
 
         return 200, {
             "draft": draft,
@@ -838,6 +785,11 @@ class PropertiesAPI:
 
         # Plan entitlements: property count and which OTAs may be connected.
         plan = get_plan(user)
+        if plan.max_properties == 0:
+            raise upgrade_required(
+                "Your 7-day free trial has ended. Upgrade to Pro to keep "
+                "syncing reviews and connect properties."
+            )
         if Property.objects.filter(user=user).count() >= plan.max_properties:
             noun = "property" if plan.max_properties == 1 else "properties"
             raise upgrade_required(
@@ -927,6 +879,7 @@ class PropertiesAPI:
             google_place_id=google_id or "",
             property_name=property_name,
             location=city_bits,
+            country=meta.get("country", "") or "",
             latitude=latitude,
             longitude=longitude,
             currency=meta.get("currencycode", "") or "",

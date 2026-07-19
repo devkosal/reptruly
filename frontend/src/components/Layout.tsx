@@ -61,7 +61,8 @@ function UserMenu() {
   return (
     <div
       ref={ref}
-      style={{ position: 'fixed', top: 16, right: 24, zIndex: 100 }}
+      className="topbar-user"
+      style={{ position: 'relative', flexShrink: 0 }}
     >
       <button
         onClick={() => setOpen(o => !o)}
@@ -86,7 +87,7 @@ function UserMenu() {
           color: '#fff', fontWeight: 700, fontSize: 13,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         }}>{initial}</span>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{displayName}</span>
+        <span className="um-name" style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{displayName}</span>
         <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>▾</span>
       </button>
 
@@ -146,6 +147,7 @@ function MenuItem({
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { properties, selectedProperty, setSelectedProperty, removeProperty } = useProperty()
   const navigate = useNavigate()
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   // Add / edit now live on the dedicated /connect-property page.
   function openCreate() {
@@ -168,152 +170,121 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="layout">
-      <aside className="sidebar">
+      <div className="mobile-topbar">
+        <button
+          className="hamburger"
+          aria-label="Open navigation"
+          onClick={() => setMobileOpen(o => !o)}
+        >
+          &#9776;
+        </button>
+        <Link to="/" className="mt-logo">rep<span>truly</span></Link>
+      </div>
+      <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
         <Link to="/" className="sidebar-logo" title="Back to reptruly.com">
           rep<span>truly</span>
         </Link>
 
-        <nav className="sidebar-nav">
-          <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'active' : ''}>
-            <NavIcon d={ICONS.dashboard} /> Dashboard
-          </NavLink>
-          <NavLink to="/reviews" className={({ isActive }) => isActive ? 'active' : ''}>
-            <NavIcon d={ICONS.reviews} /> Reviews
-          </NavLink>
-          <NavLink to="/rates" className={({ isActive }) => isActive ? 'active' : ''}>
-            <NavIcon d={ICONS.rates} /> Rates
-          </NavLink>
-          <NavLink to="/calendar" className={({ isActive }) => isActive ? 'active' : ''}>
-            <NavIcon d={ICONS.calendar} /> Demand Calendar
-          </NavLink>
-          <NavLink to="/analytics" className={({ isActive }) => isActive ? 'active' : ''}>
-            <NavIcon d={ICONS.analytics} /> Analytics
-          </NavLink>
-        </nav>
-
         <div className="sidebar-properties">
-          <div className="sidebar-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-            <span>Properties</span>
-            <button
-              onClick={openCreate}
-              title="Connect a new property"
-              style={{
-                background: 'rgba(129,140,248,0.15)',
-                border: '1px solid rgba(129,140,248,0.4)',
-                color: '#c7d2fe',
-                borderRadius: 7,
-                padding: '3px 10px',
-                cursor: 'pointer',
-                fontSize: 11,
-                fontWeight: 700,
-                fontFamily: 'inherit',
-                letterSpacing: '0.02em',
-                transition: 'background 0.15s, color 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent)'; e.currentTarget.style.color = '#fff' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(129,140,248,0.15)'; e.currentTarget.style.color = '#c7d2fe' }}
-            >
+          <div className="sidebar-properties-head">
+            <span className="sidebar-section-title" style={{ padding: 0 }}>
+              Properties{properties.length > 0 ? ` · ${properties.length}` : ''}
+            </span>
+            <button className="sp-add-btn" onClick={openCreate} title="Connect a new property">
               + Add
             </button>
           </div>
           {properties.length > 0 && (
+            <div className="sp-hint">Pick one to focus every page on it.</div>
+          )}
+          {properties.length > 1 && (
             <button
               className={`sidebar-property-btn ${selectedProperty === null ? 'active' : ''}`}
-              onClick={() => setSelectedProperty(null)}
+              onClick={() => { setSelectedProperty(null); setMobileOpen(false) }}
             >
-              <span className="sp-dot" />
-              All Properties
+              <span className="sp-avatar sp-avatar-all">⌂</span>
+              <span className="sp-text">
+                <span className="sp-name">All properties</span>
+                <span className="sp-loc">Portfolio overview</span>
+              </span>
             </button>
           )}
           {properties.map(p => {
             const otaBadges = [
-              p.booking_hotel_id && 'B',
-              p.expedia_property_id && 'E',
-              p.google_place_id && 'G',
+              p.booking_hotel_id && 'Booking',
+              p.expedia_property_id && 'Expedia',
+              p.google_place_id && 'Google',
             ].filter(Boolean) as string[]
-            const isActive = selectedProperty?.id === p.id
+            // With a single property there is no "All properties" row, so it is the
+            // implicit focus even before it's clicked.
+            const isActive = selectedProperty ? selectedProperty.id === p.id : properties.length === 1
             return (
-              <div
-                key={p.id}
-                className="sidebar-property-row"
-                style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}
-              >
+              <div key={p.id} className="sidebar-property-row">
                 <button
                   className={`sidebar-property-btn ${isActive ? 'active' : ''}`}
-                  onClick={() => setSelectedProperty(p)}
-                  style={{ flex: '1 1 auto', minWidth: 0 }}
+                  onClick={() => { setSelectedProperty(p); setMobileOpen(false) }}
                 >
-                  <span className="sp-dot" />
-                  <span className="sp-name">{p.property_name}</span>
-                  <span className="sp-loc">
-                    {p.location || `${otaBadges.join(' · ')}`}
+                  <span className="sp-avatar">{p.property_name?.[0]?.toUpperCase() ?? '?'}</span>
+                  <span className="sp-text">
+                    <span className="sp-name">{p.property_name}</span>
+                    <span className="sp-loc">
+                      {p.location || (otaBadges.length ? otaBadges.join(' · ') : 'No channels yet')}
+                    </span>
                   </span>
                 </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); openEdit(p) }}
-                  title="Edit OTA links"
-                  aria-label="Edit property"
-                  style={{
-                    flexShrink: 0,
-                    width: 24,
-                    height: 24,
-                    background: 'transparent',
-                    border: '1px solid rgba(255,255,255,0.14)',
-                    color: 'rgba(255,255,255,0.55)',
-                    cursor: 'pointer',
-                    borderRadius: 6,
-                    fontSize: 11,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: 0,
-                    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--accent)'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'var(--accent)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.55)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)' }}
-                >
-                  ✎
-                </button>
-                <button
-                  onClick={(e) => handleRemove(p.id, p.property_name, e)}
-                  title="Remove property"
-                  aria-label="Remove property"
-                  style={{
-                    flexShrink: 0,
-                    width: 24,
-                    height: 24,
-                    background: 'transparent',
-                    border: '1px solid rgba(255,255,255,0.14)',
-                    color: 'rgba(255,255,255,0.55)',
-                    cursor: 'pointer',
-                    borderRadius: 6,
-                    fontSize: 13,
-                    lineHeight: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: 0,
-                    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bad)'; e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'var(--bad)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.55)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)' }}
-                >
-                  ×
-                </button>
+                <div className="sp-actions">
+                  <button
+                    className="sp-action"
+                    onClick={(e) => { e.stopPropagation(); openEdit(p) }}
+                    title="Edit OTA links"
+                    aria-label="Edit property"
+                  >
+                    ✎
+                  </button>
+                  <button
+                    className="sp-action sp-action-danger"
+                    onClick={(e) => handleRemove(p.id, p.property_name, e)}
+                    title="Remove property"
+                    aria-label="Remove property"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             )
           })}
           {properties.length === 0 && (
-            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', padding: '8px 4px' }}>
-              No properties yet. Click "+ Add" to connect one.
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', padding: '8px 4px', lineHeight: 1.5 }}>
+              No properties yet. Click "+ Add" to connect your first one.
             </div>
           )}
         </div>
 
       </aside>
-      <UserMenu />
-      <main className="main">{children}</main>
-
+      {mobileOpen && <div className="sidebar-overlay" onClick={() => setMobileOpen(false)} />}
+      <div className="workspace">
+        <header className="topbar">
+          <nav className="topbar-nav">
+            <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'active' : ''}>
+              <NavIcon d={ICONS.dashboard} /> Dashboard
+            </NavLink>
+            <NavLink to="/reviews" className={({ isActive }) => isActive ? 'active' : ''}>
+              <NavIcon d={ICONS.reviews} /> Reviews
+            </NavLink>
+            <NavLink to="/rates" className={({ isActive }) => isActive ? 'active' : ''}>
+              <NavIcon d={ICONS.rates} /> Rates
+            </NavLink>
+            <NavLink to="/calendar" className={({ isActive }) => isActive ? 'active' : ''}>
+              <NavIcon d={ICONS.calendar} /> Demand Calendar
+            </NavLink>
+            <NavLink to="/analytics" className={({ isActive }) => isActive ? 'active' : ''}>
+              <NavIcon d={ICONS.analytics} /> Analytics
+            </NavLink>
+          </nav>
+          <UserMenu />
+        </header>
+        <main className="main">{children}</main>
+      </div>
     </div>
   )
 }

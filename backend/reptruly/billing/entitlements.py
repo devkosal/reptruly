@@ -14,8 +14,9 @@ from ninja.errors import HttpError
 # Stripe subscription statuses that count as an active Pro plan.
 ACTIVE_STATUSES = ("active", "trialing")
 
-# Free trial for first-time subscribers (checkout sets trial_period_days).
-TRIAL_DAYS = 14
+# Starter is a free trial, not a free-forever tier: full Starter access for
+# this many days after signup, then upgrade walls until a Pro subscription.
+STARTER_TRIAL_DAYS = 7
 
 # OTA keys as used across the reviews app.
 OTA_BOOKING = "booking"
@@ -36,6 +37,16 @@ STARTER = Plan(
     name="Starter",
     max_properties=1,
     allowed_otas=frozenset({OTA_BOOKING}),
+    ai_enabled=False,
+    rate_shopping=False,
+)
+
+# Starter trial has lapsed and no Pro subscription exists. Existing data stays
+# readable, but everything gated is locked until the user upgrades.
+EXPIRED = Plan(
+    name="Trial ended",
+    max_properties=0,
+    allowed_otas=frozenset(),
     ai_enabled=False,
     rate_shopping=False,
 )
@@ -63,15 +74,31 @@ def active_subscription(user) -> Subscription | None:
     )
 
 
-def has_ever_subscribed(user) -> bool:
-    """Any subscription in any status — gates one-time perks like the free trial."""
-    if user.customer is None:
-        return False
-    return Subscription.objects.filter(customer=user.customer).exists()
+def starter_trial_ends_at(user):
+    """When the user's 7-day Starter trial ends (datetime)."""
+    from datetime import timedelta
+
+    return user.date_joined + timedelta(days=STARTER_TRIAL_DAYS)
+
+
+def starter_trial_days_left(user) -> int:
+    """Days of Starter trial remaining (ceiling), floored at 0."""
+    import math
+
+    from django.utils import timezone
+
+    seconds = (starter_trial_ends_at(user) - timezone.now()).total_seconds()
+    return max(0, math.ceil(seconds / 86400))
 
 
 def get_plan(user) -> Plan:
-    return PRO if active_subscription(user) is not None else STARTER
+    from django.utils import timezone
+
+    if active_subscription(user) is not None:
+        return PRO
+    if timezone.now() >= starter_trial_ends_at(user):
+        return EXPIRED
+    return STARTER
 
 
 def upgrade_required(message: str) -> HttpError:

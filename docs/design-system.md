@@ -84,3 +84,14 @@ faint `rgba(255,255,255,0.35)`, hairlines `rgba(255,255,255,0.08)`.
 4. Status/semantic colors only via `--good/--warn/--bad` and their tints.
 5. Keep ALL existing behavior, props, API calls, routes, and data logic unchanged —
    this is a visual/organizational pass only.
+
+## Responsive
+
+The app shell collapses at **900px**: the fixed sidebar becomes a slide-in drawer
+(`.sidebar.open` + `.sidebar-overlay`), a fixed `.mobile-topbar` (hamburger + logo)
+appears, and `.main` drops its left margin. The marketing `TopNav` collapses at
+**800px** into a hamburger with a stacked link panel. Use the `.table-scroll`
+utility (`overflow-x: auto`) around any wide table or grid so it scrolls
+horizontally on phones instead of breaking the page; fixed inline grid templates
+get a className + `!important` media override in `styles.css` (e.g.
+`.onboarding-grid`, `.form-grid-2`, `.home-footer-grid`, `.headline-stats`).

@@ -18,6 +18,9 @@ interface Review {
   reply: string
   reservation_id: string
   reviewed_at: string | null
+  tags: string[]
+  draft_reply: string
+  draft_generated_at: string | null
 }
 
 interface ReviewListResponse {
@@ -29,6 +32,27 @@ interface ReviewListResponse {
 }
 
 const PAGE_LIMIT = 20
+
+// Fixed auto-tag taxonomy — keep in sync with backend/reptruly/reviews/tagging.py
+const TAG_OPTIONS = [
+  'cleanliness', 'location', 'staff', 'breakfast', 'room', 'bathroom',
+  'noise', 'wifi', 'parking', 'value', 'amenities', 'checkin',
+]
+const MAX_TAG_CHIPS = 4
+
+function tagLabel(tag: string): string {
+  if (tag === 'wifi') return 'Wi-Fi'
+  if (tag === 'checkin') return 'Check-in'
+  return tag.charAt(0).toUpperCase() + tag.slice(1)
+}
+
+// Sentiment is derived from the 0-10 score, not stored: >=8 positive, >=6 neutral, else negative.
+function sentimentChip(score: number | null): { label: string; cls: string } | null {
+  if (score === null) return null
+  if (score >= 8) return { label: 'Positive', cls: 'chip chip-good' }
+  if (score >= 6) return { label: 'Neutral', cls: 'chip' }
+  return { label: 'Negative', cls: 'chip chip-bad' }
+}
 
 function scoreBadgeClass(score: number | null): string {
   if (score === null) return 'score-badge'
@@ -76,6 +100,38 @@ function replyButtonLabel(otaName: string): string {
   return otaName ? `Reply on ${otaName} ↗` : 'Reply ↗'
 }
 
+// Reply Studio templates — static, well-written starting points inserted into
+// the AI draft textarea. {guest} is replaced with the reviewer's first name.
+const REPLY_TEMPLATES: Array<{ value: string; label: string; text: string }> = [
+  {
+    value: 'thank_5_star',
+    label: 'Thank a 5★ guest',
+    text: 'Dear {guest}, thank you so much for the wonderful review — it truly made our team\'s day. We\'re delighted you enjoyed your stay with us, and we\'d love to welcome you back whenever your travels bring you this way again.',
+  },
+  {
+    value: 'apologize_bad_stay',
+    label: 'Apologize for a bad stay',
+    text: 'Dear {guest}, we\'re sincerely sorry your stay fell short of what you deserved. This isn\'t the experience we work hard to deliver, and your feedback has been shared directly with our team. Please reach out to us — we\'d welcome the chance to make things right.',
+  },
+  {
+    value: 'address_complaint',
+    label: 'Address a specific complaint',
+    text: 'Dear {guest}, thank you for bringing this to our attention — you\'re right to expect better. We\'ve raised the issue with the responsible team and are putting a fix in place so it doesn\'t happen again. We appreciate your honesty and hope for another opportunity to host you properly.',
+  },
+  {
+    value: 'invite_back_mixed',
+    label: 'Invite back a mixed review',
+    text: 'Dear {guest}, thank you for the balanced feedback — we\'re glad there was plenty you enjoyed, and we hear you on where we can do better. We\'re actively working on exactly that, and we\'d love the chance to show you an even smoother stay next time.',
+  },
+]
+
+function templateText(value: string, reviewerName: string): string {
+  const tpl = REPLY_TEMPLATES.find(t => t.value === value)
+  if (!tpl) return ''
+  const first = (reviewerName || '').trim().split(/\s+/)[0] || 'guest'
+  return tpl.text.replace(/\{guest\}/g, first)
+}
+
 export default function Reviews() {
   const { selectedProperty } = useProperty()
   // URL search params let other pages (Analytics drill-down) link straight into a pre-filtered view.
@@ -91,6 +147,7 @@ export default function Reviews() {
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '')
   const [otaFilter, setOtaFilter] = useState(() => searchParams.get('ota_name') ?? '')
   const [replyFilter, setReplyFilter] = useState(() => searchParams.get('has_reply') ?? '')
+  const [tagFilter, setTagFilter] = useState(() => searchParams.get('tag') ?? '')
   const [minScore, setMinScore] = useState(() => searchParams.get('min_score') ?? '')
   const [maxScore, setMaxScore] = useState(() => searchParams.get('max_score') ?? '')
   const [fromDate, setFromDate] = useState(() => searchParams.get('from_date') ?? '')
@@ -101,6 +158,7 @@ export default function Reviews() {
     setSearch(searchParams.get('search') ?? '')
     setOtaFilter(searchParams.get('ota_name') ?? '')
     setReplyFilter(searchParams.get('has_reply') ?? '')
+    setTagFilter(searchParams.get('tag') ?? '')
     setMinScore(searchParams.get('min_score') ?? '')
     setMaxScore(searchParams.get('max_score') ?? '')
     setFromDate(searchParams.get('from_date') ?? '')
@@ -117,6 +175,8 @@ export default function Reviews() {
   const [aiDraftError, setAiDraftError] = useState('')
   const [aiUpgradeMsg, setAiUpgradeMsg] = useState('')
   const [aiCopied, setAiCopied] = useState(false)
+  // True when the open panel was pre-filled from a stored (pre-generated) draft.
+  const [aiPregenerated, setAiPregenerated] = useState(false)
 
   function readReplyPrefs() {
     try {
@@ -139,6 +199,7 @@ export default function Reviews() {
     setAiDraftError('')
     setAiUpgradeMsg('')
     setAiCopied(false)
+    setAiPregenerated(false)
     const prefs = readReplyPrefs()
     try {
       const res = await fetch(`/api/reviews/${reviewId}/draft-reply`, {
@@ -158,6 +219,9 @@ export default function Reviews() {
       }
       const data = await res.json()
       setAiDraftText(data.draft || '')
+      // The backend persists the draft on the review — mirror it locally so
+      // the "Draft ready" chip and instant prefill stay in sync.
+      setReviews(rs => rs.map(x => (x.id === reviewId ? { ...x, draft_reply: data.draft || '' } : x)))
     } catch (e: any) {
       setAiDraftError(e.message || 'Could not generate draft')
     } finally {
@@ -165,13 +229,21 @@ export default function Reviews() {
     }
   }
 
-  function openAIDraft(reviewId: string) {
-    setAiDraftFor(reviewId)
-    setAiDraftText('')
+  function openAIDraft(review: Review) {
+    setAiDraftFor(review.id)
     setAiDraftError('')
     setAiUpgradeMsg('')
     setAiCopied(false)
-    fetchAIDraft(reviewId)
+    if (review.draft_reply) {
+      // Pre-generated during sync (or persisted from a previous session) —
+      // show it instantly, no API call.
+      setAiDraftText(review.draft_reply)
+      setAiPregenerated(true)
+      return
+    }
+    setAiDraftText('')
+    setAiPregenerated(false)
+    fetchAIDraft(review.id)
   }
 
   function closeAIDraft() {
@@ -180,6 +252,7 @@ export default function Reviews() {
     setAiDraftError('')
     setAiUpgradeMsg('')
     setAiCopied(false)
+    setAiPregenerated(false)
   }
 
   async function copyAndOpen(reviewId: string, otaName: string, propertyId: string) {
@@ -207,6 +280,7 @@ export default function Reviews() {
     if (search) params.set('search', search)
     if (otaFilter) params.set('ota_name', otaFilter)
     if (replyFilter !== '') params.set('has_reply', replyFilter)
+    if (tagFilter) params.set('tag', tagFilter)
     if (minScore) params.set('min_score', minScore)
     if (maxScore) params.set('max_score', maxScore)
     // Only send dates that fully parse as YYYY-MM-DD — stops mid-typing partials reaching the server.
@@ -231,10 +305,10 @@ export default function Reviews() {
   // Use validated date params in the dependency array so partial date strings don't trigger refetches.
   const fromDateParam = /^\d{4}-\d{2}-\d{2}$/.test(fromDate) ? fromDate : ''
   const toDateParam = /^\d{4}-\d{2}-\d{2}$/.test(toDate) ? toDate : ''
-  useEffect(() => { fetchReviews(1) }, [selectedProperty, search, otaFilter, replyFilter, minScore, maxScore, fromDateParam, toDateParam])
+  useEffect(() => { fetchReviews(1) }, [selectedProperty, search, otaFilter, replyFilter, tagFilter, minScore, maxScore, fromDateParam, toDateParam])
 
   const totalPages = Math.ceil(total / PAGE_LIMIT)
-  const hasActiveFilters = !!(search || otaFilter || replyFilter || minScore || maxScore || fromDate || toDate)
+  const hasActiveFilters = !!(search || otaFilter || replyFilter || tagFilter || minScore || maxScore || fromDate || toDate)
 
   // CSV download honoring the current filters (same params as fetchReviews, minus paging).
   const exportParams = new URLSearchParams()
@@ -303,6 +377,13 @@ export default function Reviews() {
           <option value="Airbnb">Airbnb</option>
         </select>
 
+        <select className="filter-select" value={tagFilter} onChange={e => setTagFilter(e.target.value)}>
+          <option value="">All topics</option>
+          {TAG_OPTIONS.map(t => (
+            <option key={t} value={t}>{tagLabel(t)}</option>
+          ))}
+        </select>
+
         {/* Reply status — small exclusive toggle, so a segmented control */}
         <div className="seg">
           <button type="button" className={`seg-btn${replyFilter === '' ? ' active' : ''}`} onClick={() => setReplyFilter('')}>
@@ -353,7 +434,7 @@ export default function Reviews() {
         <button
           className="btn btn-ghost btn-sm"
           onClick={() => {
-            setSearch(''); setOtaFilter(''); setReplyFilter('')
+            setSearch(''); setOtaFilter(''); setReplyFilter(''); setTagFilter('')
             setMinScore(''); setMaxScore(''); setFromDate(''); setToDate('')
             // Also drop URL params so the URL doesn't lie about the active filter set.
             setSearchParams({})
@@ -417,6 +498,14 @@ export default function Reviews() {
                       {r.reviewer_name && (
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>· {r.reviewer_name}</span>
                       )}
+                      {(r.tags || []).slice(0, MAX_TAG_CHIPS).map(t => (
+                        <span key={t} className="chip" style={{ fontSize: 11, padding: '2px 8px' }}>{tagLabel(t)}</span>
+                      ))}
+                      {(r.tags || []).length > MAX_TAG_CHIPS && (
+                        <span className="chip" style={{ fontSize: 11, padding: '2px 8px', color: 'var(--text-muted)' }}>
+                          +{(r.tags || []).length - MAX_TAG_CHIPS}
+                        </span>
+                      )}
                       <span style={{ fontSize: 12, color: 'var(--text-faint)', marginLeft: 'auto' }}>
                         {formatDate(r.reviewed_at)}
                       </span>
@@ -449,11 +538,16 @@ export default function Reviews() {
                     ) : (
                       <span className="chip chip-warn">Pending</span>
                     )}
+                    {!r.has_reply && r.draft_reply && (
+                      <span className="chip chip-accent" style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap' }}>
+                        Draft ready
+                      </span>
+                    )}
                     {!r.has_reply && (
                       <button
                         type="button"
                         className="btn btn-secondary btn-sm"
-                        onClick={e => { e.stopPropagation(); openAIDraft(r.id) }}
+                        onClick={e => { e.stopPropagation(); openAIDraft(r) }}
                         disabled={aiDraftFor === r.id && aiDraftLoading}
                         style={{ whiteSpace: 'nowrap' }}
                       >
@@ -558,6 +652,11 @@ export default function Reviews() {
                           marginTop: 6, fontSize: 11, color: 'var(--text-muted)',
                           display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                         }}>
+                          {aiPregenerated && (
+                            <span style={{ color: 'var(--accent)', fontWeight: 700 }}>
+                              Pre-generated — Regenerate for a fresh take.
+                            </span>
+                          )}
                           <span>Tone & language from your <a href="/settings" style={{ color: 'var(--accent)', fontWeight: 600 }}>Settings</a>.</span>
                           <span style={{ color: 'var(--text-faint)' }}>· Edit freely before sending.</span>
                         </div>
@@ -594,6 +693,21 @@ export default function Reviews() {
                           >
                             Copy only
                           </button>
+                          <select
+                            className="filter-select"
+                            value=""
+                            onChange={e => {
+                              const text = templateText(e.target.value, r.reviewer_name)
+                              if (text) { setAiDraftText(text); setAiPregenerated(false); setAiCopied(false) }
+                            }}
+                            title="Replace the draft with a ready-made template"
+                            style={{ fontSize: 12, cursor: 'pointer', marginLeft: 'auto' }}
+                          >
+                            <option value="">Insert template…</option>
+                            {REPLY_TEMPLATES.map(t => (
+                              <option key={t.value} value={t.value}>{t.label}</option>
+                            ))}
+                          </select>
                         </div>
                       </>
                     )}
@@ -654,6 +768,10 @@ export default function Reviews() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span className={otaBadgeClass(selectedReview.ota_name)}>{selectedReview.ota_name || 'Other'}</span>
+                  {(() => {
+                    const s = sentimentChip(selectedReview.overall_score)
+                    return s ? <span className={s.cls} style={{ marginLeft: 8 }}>{s.label}</span> : null
+                  })()}
                   <div style={{ fontSize: 14, color: 'var(--ink)', marginTop: 6, fontWeight: 600 }}>
                     {selectedReview.property_name || '—'}
                   </div>

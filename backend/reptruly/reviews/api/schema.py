@@ -21,6 +21,8 @@ class ReviewOut(Schema):
     scores: list
     tags: list
     reviewed_at: Optional[datetime] = None
+    draft_reply: str = ""
+    draft_generated_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

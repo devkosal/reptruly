@@ -27,8 +27,8 @@ const TIERS: Tier[] = [
   {
     name: 'Starter',
     price: '$0',
-    cadence: 'forever',
-    description: 'For one property — try every feature for free.',
+    cadence: 'for 7 days',
+    description: 'Try reptruly on one property — free for 7 days, no card required.',
     features: [
       '1 property',
       'Booking.com review sync',
@@ -37,8 +37,9 @@ const TIERS: Tier[] = [
       'Basic analytics (per-OTA scores)',
       'Demand calendar (events + weather + holidays)',
     ],
-    ctaLabel: 'Use it free',
-    ctaHref: '/',
+    ctaLabel: 'Start 7-day free trial',
+    ctaHref: '/login',
+    ctaNote: 'No card required · upgrade to Pro anytime',
   },
   {
     name: 'Pro',
@@ -55,11 +56,11 @@ const TIERS: Tier[] = [
       'Rate shopping vs. comp set',
       'Priority email support',
     ],
-    ctaLabel: 'Start 14-day free trial',
+    ctaLabel: 'Upgrade to Pro',
     ctaHref: '/contact',
     checkout: true,
     highlight: true,
-    ctaNote: 'Free for 14 days · card required · cancel anytime',
+    ctaNote: 'Billed today · cancel anytime',
   },
   {
     name: 'Group',

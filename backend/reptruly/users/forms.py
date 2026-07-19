@@ -18,10 +18,14 @@ class UserAdminChangeForm(admin_forms.UserChangeForm):
         model = User
 
 
-class UserAdminCreationForm(admin_forms.UserCreationForm):
-    """Form for User Creation in the Admin Area."""
+class UserAdminCreationForm(admin_forms.AdminUserCreationForm):
+    """Form for User Creation in the Admin Area.
 
-    class Meta(admin_forms.UserCreationForm.Meta):
+    Extends AdminUserCreationForm (not UserCreationForm) — Django 5.1+ admin
+    add-form fieldsets include the ``usable_password`` field it provides.
+    """
+
+    class Meta(admin_forms.AdminUserCreationForm.Meta):
         model = User
         error_messages = {
             "username": {"unique": _("This username has already been taken.")}

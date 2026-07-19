@@ -60,6 +60,7 @@ const MENUS: NavMenu[] = [
 
 export default function TopNav() {
   const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -68,6 +69,7 @@ export default function TopNav() {
     function onClickOutside(e: MouseEvent) {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
         setOpenMenu(null)
+        setMobileNavOpen(false)
       }
     }
     document.addEventListener('mousedown', onClickOutside)
@@ -76,6 +78,7 @@ export default function TopNav() {
 
   function handleSubItemClick(href: string) {
     setOpenMenu(null)
+    setMobileNavOpen(false)
     if (href.includes('#')) {
       const [path, anchor] = href.split('#')
       if (path) navigate(path)
@@ -122,7 +125,7 @@ export default function TopNav() {
         </span>
       </Link>
 
-      <nav style={{ display: 'flex', gap: 4, flex: 1 }}>
+      <nav className="topnav-links" style={{ display: 'flex', gap: 4, flex: 1 }}>
         {MENUS.map(menu => {
           const isOpen = openMenu === menu.label
           const hasItems = !!menu.items?.length
@@ -230,7 +233,7 @@ export default function TopNav() {
         })}
       </nav>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="topnav-ctas" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {user ? (
           <>
             <span style={{ fontSize: 12, color: 'var(--text-muted)', marginRight: 4 }}>
@@ -287,7 +290,105 @@ export default function TopNav() {
           </>
         )}
       </div>
+      <button
+        type="button"
+        className="topnav-hamburger"
+        aria-label="Open menu"
+        aria-expanded={mobileNavOpen}
+        onClick={() => setMobileNavOpen(o => !o)}
+      >
+        &#9776;
+      </button>
     </div>
+
+    {mobileNavOpen && (
+      <div
+        style={{
+          position: 'absolute',
+          top: 'calc(100% + 8px)',
+          left: 0,
+          right: 0,
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 14,
+          boxShadow: 'var(--shadow-md)',
+          padding: 10,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+          zIndex: 120,
+        }}
+      >
+        {[
+          { label: 'Review Inbox', href: '/reviews' },
+          { label: 'Rate Shopping', href: '/rates' },
+          { label: 'Demand Calendar', href: '/calendar' },
+          { label: 'Analytics', href: '/analytics' },
+          { label: 'Pricing', href: '/pricing' },
+          { label: 'Resources', href: '/resources' },
+          { label: 'Company', href: '/about' },
+          { label: 'Help', href: '/help' },
+          { label: 'Contact', href: '/contact' },
+        ].map(item => (
+          <button
+            key={item.label}
+            onClick={() => handleSubItemClick(item.href)}
+            style={{
+              width: '100%',
+              textAlign: 'left',
+              background: 'transparent',
+              border: 'none',
+              padding: '11px 12px',
+              borderRadius: 8,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 14,
+              fontWeight: 600,
+              color: 'var(--text)',
+            }}
+          >
+            {item.label}
+          </button>
+        ))}
+        <div style={{ height: 1, background: 'var(--border)', margin: '6px 0' }} />
+        {user ? (
+          <button
+            onClick={() => handleSubItemClick('/dashboard')}
+            style={{
+              background: 'var(--grad-accent)', color: '#fff', padding: '10px 16px',
+              borderRadius: 10, fontSize: 13, fontWeight: 700, border: 'none',
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Go to Dashboard
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={() => handleSubItemClick('/login')}
+              style={{
+                background: 'var(--surface)', color: 'var(--text)', padding: '10px 16px',
+                borderRadius: 10, fontSize: 13, fontWeight: 600,
+                border: '1px solid var(--border-strong)', cursor: 'pointer', fontFamily: 'inherit',
+                marginBottom: 6,
+              }}
+            >
+              Sign in
+            </button>
+            <button
+              onClick={() => handleSubItemClick('/contact')}
+              style={{
+                background: 'var(--grad-accent)', color: '#fff', padding: '10px 16px',
+                borderRadius: 10, fontSize: 13, fontWeight: 700, border: 'none',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              Book a demo
+            </button>
+          </>
+        )}
+      </div>
+    )}
     </div>
   )
 }

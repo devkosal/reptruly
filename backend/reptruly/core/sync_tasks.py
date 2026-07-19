@@ -66,13 +66,16 @@ def _run_sync(domain: str, worker: Callable[[], int]) -> dict:
 
 def _do_reviews() -> int:
     """Refresh reviews from all connected OTAs for every Property."""
+    from reptruly.billing.entitlements import EXPIRED, get_plan
     from reptruly.reviews.models import Property
     from reptruly.reviews.tasks import _sync_property
 
     total = 0
     for prop in Property.objects.exclude(
         booking_hotel_id="", expedia_property_id="", google_place_id=""
-    ):
+    ).select_related("user"):
+        if get_plan(prop.user) is EXPIRED:
+            continue  # Starter trial lapsed without upgrading — stop burning API credits
         try:
             total += _sync_property(prop)
         except Exception:
@@ -81,25 +84,16 @@ def _do_reviews() -> int:
 
 
 def _do_rates() -> int:
-    """Refresh competitor rates. Stub — real fetcher to be implemented."""
-    logger.info("Rates sync stub ran — no fetcher implemented yet.")
-    return 0
+    """Snapshot rate history + comp-set movement alerts for Pro properties."""
+    from reptruly.reviews.rate_history import run_rates_sync
+
+    return run_rates_sync()
 
 
-def _do_calendar() -> int:
-    """Refresh demand-calendar signals (events, holidays, weather).
-
-    Stub — the `reptruly.events` app has API clients but no persistence
-    model yet, so this only records the heartbeat for now.
-    """
-    logger.info("Calendar sync stub ran — no fetcher implemented yet.")
-    return 0
-
-
-def _do_analytics() -> int:
-    """Recompute analytics aggregates. Stub for now."""
-    logger.info("Analytics sync stub ran — no aggregator implemented yet.")
-    return 0
+# Calendar and analytics are computed on demand with 24h caches — there is
+# nothing to sync, so they no longer record fake SUCCESS heartbeats or appear
+# on the beat schedule. ON_DEMAND_DOMAINS drives the honest UI treatment.
+ON_DEMAND_DOMAINS = (SyncStatus.Domain.CALENDAR, SyncStatus.Domain.ANALYTICS)
 
 
 # ---------- Celery entrypoints ----------
@@ -120,25 +114,7 @@ def sync_rates_daily(self):
         raise self.retry(exc=exc, countdown=300)
 
 
-@shared_task(bind=True, max_retries=2)
-def sync_calendar_daily(self):
-    try:
-        return _run_sync(SyncStatus.Domain.CALENDAR, _do_calendar)
-    except Exception as exc:
-        raise self.retry(exc=exc, countdown=300)
-
-
-@shared_task(bind=True, max_retries=2)
-def sync_analytics_daily(self):
-    try:
-        return _run_sync(SyncStatus.Domain.ANALYTICS, _do_analytics)
-    except Exception as exc:
-        raise self.retry(exc=exc, countdown=300)
-
-
 DOMAIN_TO_TASK = {
     SyncStatus.Domain.REVIEWS: sync_reviews_daily,
     SyncStatus.Domain.RATES: sync_rates_daily,
-    SyncStatus.Domain.CALENDAR: sync_calendar_daily,
-    SyncStatus.Domain.ANALYTICS: sync_analytics_daily,
 }

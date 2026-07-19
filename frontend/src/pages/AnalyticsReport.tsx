@@ -159,7 +159,7 @@ function HeadlineStats({ data }: { data: Analytics | null }) {
     { label: 'Awaiting reply', value: String(data.pending_reply) },
   ]
   return (
-    <div style={{
+    <div className="headline-stats" style={{
       display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 14,
     }}>
       {items.map(it => (
@@ -186,7 +186,7 @@ function OTATable({ data }: { data: Analytics | null }) {
   }
   const otas = Object.entries(data.per_ota).sort((a, b) => b[1].total - a[1].total)
   return (
-    <table style={tableStyle}>
+    <div className="table-scroll"><table style={tableStyle}>
       <thead>
         <tr style={{ background: 'var(--surface-2)' }}>
           {['OTA', 'Reviews', 'Avg score', 'Replied', 'Pending', 'Reply rate'].map(h => (
@@ -206,7 +206,7 @@ function OTATable({ data }: { data: Analytics | null }) {
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   )
 }
 
@@ -256,7 +256,7 @@ function TopicsTable({ data }: { data: TopicScores | null }) {
     low: { bg: 'var(--good-soft)', fg: 'var(--good)' },
   }
   return (
-    <table style={tableStyle}>
+    <div className="table-scroll"><table style={tableStyle}>
       <thead>
         <tr style={{ background: 'var(--surface-2)' }}>
           {['Topic', 'Score', 'Mentions', 'Priority', 'AI insight'].map(h => (
@@ -283,7 +283,7 @@ function TopicsTable({ data }: { data: TopicScores | null }) {
           )
         })}
       </tbody>
-    </table>
+    </table></div>
   )
 }
 
@@ -304,7 +304,7 @@ function TrendsBlock({ data }: { data: Trends | null }) {
       </div>
       {otas.length > 0 && (
         <div style={{ gridColumn: '1 / -1' }}>
-          <table style={tableStyle}>
+          <div className="table-scroll"><table style={tableStyle}>
             <thead>
               <tr style={{ background: 'var(--surface-2)' }}>
                 {['OTA', '7-day avg', '7-day count', '30-day avg', '30-day count'].map(h => (
@@ -326,7 +326,7 @@ function TrendsBlock({ data }: { data: Trends | null }) {
                 )
               })}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
     </div>

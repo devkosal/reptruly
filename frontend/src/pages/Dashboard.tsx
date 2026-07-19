@@ -1,9 +1,9 @@
-import { FormEvent, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import PhoneField from '../components/PhoneField'
 import ThemedPage from '../components/ThemedPage'
 import { useAuth } from '../context/AuthContext'
-import { useProperty } from '../context/PropertyContext'
+import { Property, useProperty } from '../context/PropertyContext'
 import { COUNTRIES, citiesFor, dialCodeFor } from '../data/locations'
 
 const inputStyle: React.CSSProperties = {
@@ -114,7 +114,7 @@ function ProfileForm() {
   return (
     <form onSubmit={onSubmit}>
       {error && <div className="error-msg" style={{ marginBottom: 12 }}>{error}</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 12 }}>
+      <div className="form-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 12 }}>
         <Field label="Your full name *" required>
           <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} required />
         </Field>
@@ -130,7 +130,7 @@ function ProfileForm() {
           </select>
         </Field>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 12 }}>
+      <div className="form-grid-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 12 }}>
         <Field label="Company / hotel group">
           <input style={inputStyle} value={companyName} onChange={e => setCompanyName(e.target.value)} />
         </Field>
@@ -450,9 +450,436 @@ const FEATURES = [
   { icon: '📊', title: 'Analytics', desc: 'Per-OTA scores & trends',       href: '/analytics' },
 ]
 
+interface OTAStats {
+  total: number
+  avg_score: number | null
+  pending_reply: number
+}
+
+interface SummaryStats {
+  total_reviews: number
+  avg_score: number | null
+  replied: number
+  pending_reply: number
+  reviews_by_ota: Record<string, number>
+  per_ota: Record<string, OTAStats>
+}
+
+function scoreColors(score: number | null | undefined) {
+  if (score == null) return { bg: 'var(--surface-2)', fg: 'var(--text-faint)' }
+  if (score >= 7) return { bg: 'var(--good-soft)', fg: 'var(--good)' }
+  if (score >= 5) return { bg: 'var(--warn-soft)', fg: 'var(--warn)' }
+  return { bg: 'var(--bad-soft)', fg: 'var(--bad)' }
+}
+
+// Review stats for one property (or the whole portfolio when propertyName is null).
+function usePropertySummary(propertyName: string | null) {
+  const [stats, setStats] = useState<SummaryStats | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setStats(null)
+    const qs = propertyName ? `?property_name=${encodeURIComponent(propertyName)}` : ''
+    fetch(`/api/reviews/analytics/summary${qs}`, { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d) setStats(d) })
+      .catch(() => { /* tiles fall back to em-dashes */ })
+    return () => { cancelled = true }
+  }, [propertyName])
+  return stats
+}
+
+const CHANNELS = [
+  { key: 'booking_hotel_id', label: 'Booking.com' },
+  { key: 'expedia_property_id', label: 'Expedia' },
+  { key: 'google_place_id', label: 'Google' },
+] as const
+
+function ChannelChip({ connected, label }: { connected: boolean; label: string }) {
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 999,
+      background: connected ? 'rgba(16,185,129,0.18)' : 'rgba(255,255,255,0.08)',
+      color: connected ? '#6ee7b7' : 'rgba(255,255,255,0.55)',
+      border: `1px solid ${connected ? 'rgba(110,231,183,0.35)' : 'rgba(255,255,255,0.14)'}`,
+      whiteSpace: 'nowrap',
+    }}>
+      {connected ? '✓ ' : ''}{label}{connected ? '' : ' · not linked'}
+    </span>
+  )
+}
+
+function StatTiles({ stats, lastSyncedLabel }: { stats: SummaryStats | null; lastSyncedLabel: string }) {
+  return (
+    <div className="stats-grid">
+      <div className="stat-card">
+        <div className="stat-label">Guest reviews</div>
+        <div className="stat-value">{stats ? stats.total_reviews : '—'}</div>
+        <div className="stat-sub">Synced from connected channels</div>
+      </div>
+      <div className="stat-card">
+        <div className="stat-label">Average score</div>
+        <div className="stat-value">
+          {stats?.avg_score != null ? stats.avg_score.toFixed(1) : '—'}
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-faint)' }}> / 10</span>
+        </div>
+        <div className="stat-sub">Across all channels</div>
+      </div>
+      <div className="stat-card">
+        <div className="stat-label">Awaiting reply</div>
+        <div className="stat-value">{stats ? stats.pending_reply : '—'}</div>
+        <div className="stat-sub">
+          <Link to="/reviews" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>
+            Reply from the inbox →
+          </Link>
+        </div>
+      </div>
+      <div className="stat-card">
+        <div className="stat-label">Last synced</div>
+        <div className="stat-value" style={{ fontSize: 22, marginTop: 10 }}>{lastSyncedLabel}</div>
+        <div className="stat-sub">Auto-refreshes every day</div>
+      </div>
+    </div>
+  )
+}
+
+const TOOL_LINKS = [
+  { key: 'reviews',   label: 'Reviews',   icon: '⭐', href: '/reviews' },
+  { key: 'rates',     label: 'Rates',     icon: '💰', href: '/rates' },
+  { key: 'demand',    label: 'Demand',    icon: '📅', href: '/calendar' },
+  { key: 'analytics', label: 'Analytics', icon: '📊', href: '/analytics' },
+]
+
+// Tab bar shown under the property hero. "Overview" is this dashboard view;
+// the rest jump to the tool pages, already scoped to the selected property.
+function PropertyTabs() {
+  const navigate = useNavigate()
+  return (
+    <div style={{
+      display: 'flex', gap: 2, borderBottom: '1px solid var(--border)',
+      marginBottom: 22, overflowX: 'auto',
+    }}>
+      <span style={{
+        fontFamily: 'inherit', fontSize: 13.5, fontWeight: 700,
+        color: 'var(--accent)', padding: '10px 14px',
+        borderBottom: '2px solid var(--accent)', marginBottom: -1,
+        whiteSpace: 'nowrap',
+      }}>
+        Overview
+      </span>
+      {TOOL_LINKS.map(t => (
+        <button
+          key={t.key}
+          onClick={() => navigate(t.href)}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600,
+            color: 'var(--text-muted)', padding: '10px 14px',
+            borderBottom: '2px solid transparent', marginBottom: -1,
+            whiteSpace: 'nowrap', transition: 'color 0.15s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--ink)' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)' }}
+        >
+          {t.icon} {t.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Per-channel breakdown for the focused property.
+function ChannelBreakdown({ stats }: { stats: SummaryStats }) {
+  const entries = Object.entries(stats.per_ota ?? {})
+  if (!entries.length) return null
+  const max = Math.max(...entries.map(([, s]) => s.total), 1)
+  return (
+    <div className="card" style={{ marginBottom: 24 }}>
+      <div className="section-title">Reviews by channel</div>
+      <div style={{ display: 'grid', gap: 12 }}>
+        {entries.map(([name, s]) => {
+          const sc = scoreColors(s.avg_score)
+          return (
+            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ width: 110, fontSize: 13, fontWeight: 600, color: 'var(--ink)', flexShrink: 0 }}>
+                {name}
+              </span>
+              <div style={{ flex: 1, height: 8, borderRadius: 999, background: 'var(--surface-2)', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${(s.total / max) * 100}%`, height: '100%', borderRadius: 999,
+                  background: 'var(--grad-accent)',
+                }} />
+              </div>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)', width: 90, textAlign: 'right', flexShrink: 0 }}>
+                {s.total} review{s.total === 1 ? '' : 's'}
+              </span>
+              <span style={{
+                fontSize: 12, fontWeight: 700, padding: '2px 9px', borderRadius: 999,
+                background: sc.bg, color: sc.fg, flexShrink: 0, minWidth: 42, textAlign: 'center',
+              }}>
+                {s.avg_score != null ? s.avg_score.toFixed(1) : '—'}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// Focused view: everything about the one property picked in the sidebar.
+function PropertyOverview({
+  property, showBack, onBack,
+}: { property: Property; showBack: boolean; onBack: () => void }) {
+  const stats = usePropertySummary(property.property_name)
+  const lastSyncedLabel = property.last_synced_at
+    ? new Date(property.last_synced_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : 'Pending'
+
+  return (
+    <>
+      <div style={{
+        background: 'radial-gradient(ellipse at top left, rgba(79,70,229,0.28), transparent 55%), var(--grad-dark)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 18,
+        padding: '24px 28px',
+        marginBottom: 24,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 16,
+        flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, minWidth: 0, flex: '1 1 320px' }}>
+          <div style={{
+            width: 54, height: 54, borderRadius: 14, flexShrink: 0,
+            background: 'var(--grad-accent)', color: '#fff',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontWeight: 800, fontSize: 22,
+          }}>
+            {property.property_name?.[0]?.toUpperCase() ?? '?'}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            {showBack && (
+              <button
+                onClick={onBack}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                  fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.55)',
+                  fontFamily: 'inherit', marginBottom: 4,
+                }}
+              >
+                ← Back to all properties
+              </button>
+            )}
+            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', color: 'rgba(255,255,255,0.92)' }}>
+              {property.property_name}
+            </div>
+            {property.location && (
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginTop: 2 }}>{property.location}</div>
+            )}
+            <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+              {CHANNELS.map(c => (
+                <ChannelChip key={c.key} label={c.label} connected={!!property[c.key]} />
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Link
+            to={`/connect-property?edit=${encodeURIComponent(property.id)}`}
+            className="btn btn-secondary"
+            style={{ textDecoration: 'none' }}
+          >
+            Edit channels
+          </Link>
+          <Link to="/reviews" className="btn btn-primary" style={{ textDecoration: 'none' }}>
+            View reviews →
+          </Link>
+        </div>
+      </div>
+
+      <PropertyTabs />
+
+      <div className="section-title">This property at a glance</div>
+      <StatTiles stats={stats} lastSyncedLabel={lastSyncedLabel} />
+      {stats && <ChannelBreakdown stats={stats} />}
+    </>
+  )
+}
+
+// One card per property on the portfolio dashboard: identity, review summary,
+// channel status, and shortcuts into each tool scoped to that property.
+function PropertyCard({
+  property, onOpen, onTool,
+}: { property: Property; onOpen: () => void; onTool: (href: string) => void }) {
+  const stats = usePropertySummary(property.property_name)
+  const connected = CHANNELS.filter(c => !!property[c.key])
+  const sc = scoreColors(stats?.avg_score)
+
+  return (
+    <div
+      className="card"
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={e => { if (e.key === 'Enter') onOpen() }}
+      style={{
+        cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 12,
+        transition: 'box-shadow 0.15s, transform 0.15s, border-color 0.15s',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+        e.currentTarget.style.transform = 'translateY(-2px)'
+        e.currentTarget.style.borderColor = 'var(--border-strong)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.boxShadow = ''
+        e.currentTarget.style.transform = ''
+        e.currentTarget.style.borderColor = ''
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <span style={{
+          width: 42, height: 42, borderRadius: 12, flexShrink: 0,
+          background: 'var(--accent-soft)', color: 'var(--accent)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontWeight: 800, fontSize: 17,
+        }}>
+          {property.property_name?.[0]?.toUpperCase() ?? '?'}
+        </span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--ink)', lineHeight: 1.3 }}>
+            {property.property_name}
+          </div>
+          <div style={{
+            fontSize: 12, color: 'var(--text-muted)', marginTop: 2,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {property.location || 'Location not set'}
+          </div>
+        </div>
+        <span
+          title="Average review score"
+          style={{
+            fontSize: 14, fontWeight: 800, padding: '4px 10px', borderRadius: 10,
+            background: sc.bg, color: sc.fg, flexShrink: 0,
+          }}
+        >
+          {stats?.avg_score != null ? stats.avg_score.toFixed(1) : '—'}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 14, fontSize: 12.5, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+        <span><strong style={{ color: 'var(--ink)' }}>{stats ? stats.total_reviews : '…'}</strong> reviews</span>
+        <span><strong style={{ color: stats?.pending_reply ? 'var(--warn)' : 'var(--ink)' }}>{stats ? stats.pending_reply : '…'}</strong> awaiting reply</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+        {connected.length
+          ? connected.map(c => <span key={c.key} className="chip chip-good" style={{ fontSize: 11 }}>{c.label}</span>)
+          : <span className="chip" style={{ fontSize: 11 }}>No channels connected</span>}
+      </div>
+
+      <div style={{
+        display: 'flex', borderTop: '1px solid var(--border)',
+        margin: '2px -20px -20px', padding: '0 8px',
+      }}>
+        {TOOL_LINKS.map(t => (
+          <button
+            key={t.key}
+            onClick={e => { e.stopPropagation(); onTool(t.href) }}
+            style={{
+              flex: 1, background: 'none', border: 'none', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+              color: 'var(--text-muted)', padding: '11px 4px', borderRadius: 8,
+              transition: 'color 0.15s, background 0.15s', whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'var(--accent-soft)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}
+          >
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Portfolio view: totals across every property plus one summary card each.
+function PortfolioOverview({
+  properties, channelsConnected, onSelect,
+}: { properties: Property[]; channelsConnected: number; onSelect: (p: Property) => void }) {
+  const stats = usePropertySummary(null)
+  const navigate = useNavigate()
+
+  return (
+    <>
+      <div style={{
+        background: 'radial-gradient(ellipse at top left, rgba(79,70,229,0.28), transparent 55%), var(--grad-dark)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 18,
+        padding: '24px 28px',
+        marginBottom: 24,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 16,
+        flexWrap: 'wrap',
+      }}>
+        <div>
+          <div style={{
+            fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+            color: 'rgba(255,255,255,0.55)', marginBottom: 6,
+          }}>
+            All properties
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', color: 'rgba(255,255,255,0.92)' }}>
+            {properties.length} {properties.length === 1 ? 'property' : 'properties'} · {channelsConnected} review {channelsConnected === 1 ? 'channel' : 'channels'} connected
+          </div>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginTop: 4 }}>
+            Reviews sync daily. Rates and demand signals update live.
+          </div>
+        </div>
+        <Link to="/reviews" className="btn btn-primary" style={{ textDecoration: 'none' }}>
+          View reviews →
+        </Link>
+      </div>
+
+      <div className="section-title">Portfolio at a glance</div>
+      <StatTiles stats={stats} lastSyncedLabel="Daily" />
+
+      <div className="section-title" style={{ marginBottom: 4 }}>
+        Your properties ({properties.length})
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 14 }}>
+        Click a card for the full overview, or jump straight into a tool for that property.
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+        gap: 16,
+        marginBottom: 24,
+      }}>
+        {properties.map(p => (
+          <PropertyCard
+            key={p.id}
+            property={p}
+            onOpen={() => onSelect(p)}
+            onTool={href => { onSelect(p); navigate(href) }}
+          />
+        ))}
+      </div>
+    </>
+  )
+}
+
 export default function Dashboard() {
   const { user } = useAuth()
-  const { properties, propertiesLoaded } = useProperty()
+  const { properties, propertiesLoaded, selectedProperty, setSelectedProperty } = useProperty()
+
+  // The property whose overview is shown: the sidebar selection, or the only
+  // property when there is just one (no "All properties" row in that case).
+  const focus = selectedProperty ?? (properties.length === 1 ? properties[0] : null)
 
   const profileDone = !!user?.profile_completed
   const hasProperty = properties.length > 0
@@ -539,7 +966,7 @@ export default function Dashboard() {
       )}
 
       {!allReady && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 24, alignItems: 'start' }}>
+        <div className="onboarding-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 24, alignItems: 'start' }}>
         <div className="card" style={{ padding: 28 }}>
           <div className="section-title">Setup checklist</div>
 
@@ -624,110 +1051,23 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Welcome / summary band — once workspace is ready */}
+      {/* Area 1 — property overview, driven by the sidebar selection */}
       {allReady && (
-        <div style={{
-          background: 'radial-gradient(ellipse at top left, rgba(79,70,229,0.28), transparent 55%), var(--grad-dark)',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: 18,
-          padding: '24px 28px',
-          marginBottom: 24,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 16,
-          flexWrap: 'wrap',
-        }}>
-          <div>
-            <div style={{
-              fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
-              color: 'rgba(255,255,255,0.55)', marginBottom: 6,
-            }}>
-              Workspace ready
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em', color: 'rgba(255,255,255,0.92)' }}>
-              {properties.length} {properties.length === 1 ? 'property' : 'properties'} · {channelsConnected} review {channelsConnected === 1 ? 'channel' : 'channels'} connected
-            </div>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginTop: 4 }}>
-              Reviews sync daily. Rates and demand signals update live.
-            </div>
-          </div>
-          <Link to="/reviews" className="btn btn-primary" style={{ textDecoration: 'none' }}>
-            View reviews →
-          </Link>
-        </div>
+        focus ? (
+          <PropertyOverview
+            property={focus}
+            showBack={properties.length > 1}
+            onBack={() => setSelectedProperty(null)}
+          />
+        ) : (
+          <PortfolioOverview
+            properties={properties}
+            channelsConnected={channelsConnected}
+            onSelect={setSelectedProperty}
+          />
+        )
       )}
 
-      {/* Feature grid — visible always once a property exists, else hidden */}
-      {allReady && (
-        <>
-          <div className="section-title">Your tools</div>
-          <div className="stats-grid">
-            {FEATURES.map(f => (
-              <Link key={f.title} to={f.href} style={{ textDecoration: 'none', color: 'inherit' }}>
-                <div
-                  className="stat-card"
-                  style={{ cursor: 'pointer', height: '100%', transition: 'box-shadow 0.15s, transform 0.15s, border-color 0.15s' }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-                    e.currentTarget.style.transform = 'translateY(-2px)'
-                    e.currentTarget.style.borderColor = 'var(--border-strong)'
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.boxShadow = ''
-                    e.currentTarget.style.transform = ''
-                    e.currentTarget.style.borderColor = ''
-                  }}
-                >
-                  <div style={{
-                    width: 38, height: 38, borderRadius: 10, background: 'var(--accent-soft)',
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 18, marginBottom: 10,
-                  }}>
-                    {f.icon}
-                  </div>
-                  <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--ink)' }}>{f.title}</div>
-                  <div className="stat-sub">{f.desc}</div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* Property summary card — visible when properties exist */}
-      {allReady && (
-        <div className="card" style={{ marginTop: 8 }}>
-          <div className="section-title" style={{ marginBottom: 4 }}>
-            Your properties ({properties.length})
-          </div>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {properties.map(p => {
-              const otas = [
-                p.booking_hotel_id && 'Booking',
-                p.expedia_property_id && 'Expedia',
-                p.google_place_id && 'Google',
-              ].filter(Boolean) as string[]
-              return (
-                <li key={p.id} style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '12px 0', borderTop: '1px solid var(--border)',
-                }}>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{p.property_name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                      {p.location || (otas.length ? otas.join(' · ') : 'No OTAs connected')}
-                    </div>
-                  </div>
-                  <Link to="/reviews" style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, textDecoration: 'none' }}>
-                    View reviews →
-                  </Link>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      )}
     </ThemedPage>
   )
 }

@@ -11,6 +11,8 @@ from reptruly.reviews.api.controllers import (
     RatesAPI,
     ReviewsAPI,
 )
+from reptruly.reviews.api.rate_history_controller import RateHistoryAPI
+from reptruly.public_api.controllers import KeysAPI, PublicAPI
 from reptruly.users.api.controllers import AuthAPI
 
 # https://github.com/vitalik/django-ninja/issues/267
@@ -22,8 +24,11 @@ api.register_controllers(
     ReviewsAPI,
     PropertiesAPI,
     RatesAPI,
+    RateHistoryAPI,
     BadgeAPI,
     CalendarAPI,
     SyncAPI,
     BillingAPI,
+    KeysAPI,
+    PublicAPI,
 )

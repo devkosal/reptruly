@@ -23,12 +23,7 @@ daily_reviews_schedule, _ = CrontabSchedule.objects.get_or_create(
 daily_rates_schedule, _ = CrontabSchedule.objects.get_or_create(
     minute=15, hour=3, **crontab_defaults
 )
-daily_calendar_schedule, _ = CrontabSchedule.objects.get_or_create(
-    minute=30, hour=3, **crontab_defaults
-)
-daily_analytics_schedule, _ = CrontabSchedule.objects.get_or_create(
-    minute=45, hour=3, **crontab_defaults
-)
+# (calendar/analytics schedules removed — those domains compute on demand)
 # Digest emails go out after the 03:00 UTC syncs have landed fresh data.
 # 13:00 UTC ≈ 9am US Eastern.
 daily_digest_schedule, _ = CrontabSchedule.objects.get_or_create(
@@ -81,14 +76,7 @@ TASKS = [
         "reptruly.core.sync_tasks.sync_rates_daily",
         crontab=daily_rates_schedule,
     ),
-    CeleryTaskMetaData(
-        "reptruly.core.sync_tasks.sync_calendar_daily",
-        crontab=daily_calendar_schedule,
-    ),
-    CeleryTaskMetaData(
-        "reptruly.core.sync_tasks.sync_analytics_daily",
-        crontab=daily_analytics_schedule,
-    ),
+    # calendar/analytics compute on demand (24h caches) — no sync tasks.
     CeleryTaskMetaData(
         "reptruly.users.tasks.send_daily_digests",
         crontab=daily_digest_schedule,

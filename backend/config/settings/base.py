@@ -210,8 +210,10 @@ CELERY_RESULT_BACKEND_MAX_RETRIES = 10
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
-CELERY_TASK_TIME_LIMIT = 5 * 60
-CELERY_TASK_SOFT_TIME_LIMIT = 60
+# Nightly review syncs iterate every property × OTA and can legitimately run
+# for minutes on multi-property accounts — 60s was silently truncating them.
+CELERY_TASK_TIME_LIMIT = 30 * 60
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_WORKER_SEND_TASK_EVENTS = True
 CELERY_TASK_SEND_SENT_EVENT = True

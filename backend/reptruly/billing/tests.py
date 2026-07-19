@@ -5,7 +5,13 @@ from unittest.mock import patch
 import pytest
 from django.core import mail
 
-from reptruly.billing.entitlements import has_ever_subscribed
+from reptruly.billing.entitlements import (
+    EXPIRED,
+    PRO,
+    STARTER,
+    get_plan,
+    starter_trial_days_left,
+)
 from reptruly.billing.quantity import desired_quantity, sync_subscription_quantity
 from reptruly.billing.webhooks import (
     on_payment_failed,
@@ -108,26 +114,39 @@ class TestProPriceSelection:
             _pro_price("year")
 
 
-class TestTrialEligibility:
-    def test_no_customer_never_subscribed(self):
-        assert has_ever_subscribed(UserFactory()) is False
+class TestStarterTrial:
+    def _aged_user(self, days_old):
+        from datetime import timedelta
 
-    def test_customer_with_any_subscription_is_ineligible(self):
-        from djstripe.models import Customer, Subscription
+        from django.utils import timezone
 
         user = UserFactory()
-        customer = Customer.objects.create(id="cus_trialtest")
+        user.date_joined = timezone.now() - timedelta(days=days_old)
+        user.save(update_fields=["date_joined"])
+        return user
+
+    def test_fresh_signup_is_on_starter_trial(self):
+        user = self._aged_user(1)
+        assert get_plan(user) is STARTER
+        assert starter_trial_days_left(user) == 6
+
+    def test_trial_expires_after_seven_days(self):
+        user = self._aged_user(8)
+        assert get_plan(user) is EXPIRED
+        assert starter_trial_days_left(user) == 0
+        assert EXPIRED.max_properties == 0
+
+    def test_pro_subscription_overrides_expiry(self):
+        from djstripe.models import Customer, Subscription
+
+        user = self._aged_user(30)
+        customer = Customer.objects.create(id="cus_expiry")
         user.customer = customer
         user.save(update_fields=["customer"])
-        assert has_ever_subscribed(user) is False
-
-        # Even a long-cancelled subscription burns the one-time trial.
         Subscription.objects.create(
-            id="sub_trialtest",
-            customer=customer,
-            stripe_data={"status": "canceled"},
+            id="sub_expiry", customer=customer, stripe_data={"status": "active"}
         )
-        assert has_ever_subscribed(user) is True
+        assert get_plan(user) is PRO
 
 
 def _add_properties(user, n):

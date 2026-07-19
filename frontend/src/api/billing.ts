@@ -17,8 +17,8 @@ export interface BillingStatus {
   cancel_at_period_end: boolean
   trialing: boolean
   trial_end: string | null
-  /** True when checkout would start with the 14-day free trial. */
-  trial_eligible: boolean
+  /** Days left in the 7-day Starter trial (null once subscribed or expired). */
+  trial_days_left: number | null
   limits: PlanLimits
 }
 

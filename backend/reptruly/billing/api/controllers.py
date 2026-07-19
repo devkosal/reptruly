@@ -10,10 +10,10 @@ from ninja_extra import api_controller, route
 from stripe import StripeError
 
 from reptruly.billing.entitlements import (
-    TRIAL_DAYS,
+    STARTER,
     active_subscription,
     get_plan,
-    has_ever_subscribed,
+    starter_trial_days_left,
 )
 from reptruly.billing.quantity import desired_quantity, sync_subscription_quantity
 from reptruly.billing.utils import set_stripe_api_key
@@ -40,8 +40,8 @@ class BillingStatusOut(Schema):
     cancel_at_period_end: bool = False
     trialing: bool = False
     trial_end: str | None = None
-    # True when the user would get the free trial at checkout (never subscribed).
-    trial_eligible: bool = False
+    # Days left in the 7-day Starter trial (None once subscribed or expired).
+    trial_days_left: int | None = None
     limits: PlanLimitsOut
 
 
@@ -122,11 +122,12 @@ def _plan_limits(user) -> dict:
 def _status_payload(user) -> dict:
     sub = active_subscription(user)
     if sub is None:
+        plan = get_plan(user)
         return {
             "has_pro": False,
-            "plan": "Starter",
+            "plan": plan.name,
             "limits": _plan_limits(user),
-            "trial_eligible": not has_ever_subscribed(user),
+            "trial_days_left": starter_trial_days_left(user) if plan is STARTER else None,
         }
     sub_data = sub.stripe_data or {}
     item = sub.items.first()
@@ -184,16 +185,12 @@ class BillingAPI:
         customer = _get_or_create_customer(user)
         price = _pro_price(interval)
         origin = _origin(request)
-        session_kwargs = {}
-        # First-ever subscription gets a 14-day free trial; re-subscribers
-        # (cancelled and coming back) are charged immediately.
-        if not has_ever_subscribed(user):
-            session_kwargs["subscription_data"] = {"trial_period_days": TRIAL_DAYS}
         try:
             session = stripe.checkout.Session.create(
                 customer=customer.id,
                 mode="subscription",
                 # Pro is per property per month — bill one unit per connected property.
+                # No Pro trial: the free trial is the 7-day Starter period.
                 line_items=[{"price": price.id, "quantity": desired_quantity(user)}],
                 success_url=(
                     f"{origin}/settings?billing=success"
@@ -201,7 +198,6 @@ class BillingAPI:
                 ),
                 cancel_url=f"{origin}/pricing?billing=cancelled",
                 allow_promotion_codes=True,
-                **session_kwargs,
             )
         except StripeError as e:
             raise HttpError(502, f"Stripe error: {e.user_message or e}")

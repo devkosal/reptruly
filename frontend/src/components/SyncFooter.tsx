@@ -7,6 +7,9 @@ interface SyncFooterProps {
   domain: SyncDomain
   /** Optional label used in the action button (e.g. "Refresh reviews"). */
   actionLabel?: string
+  /** On-demand domains (calendar/analytics) compute per request with a 24h
+   *  cache — render an honest note instead of sync status + button. */
+  onDemand?: boolean
 }
 
 const DOMAIN_LABEL: Record<SyncDomain, string> = {
@@ -16,19 +19,20 @@ const DOMAIN_LABEL: Record<SyncDomain, string> = {
   analytics: 'Analytics',
 }
 
-export default function SyncFooter({ domain, actionLabel }: SyncFooterProps) {
+export default function SyncFooter({ domain, actionLabel, onDemand = false }: SyncFooterProps) {
   const [row, setRow] = useState<SyncStatusRow | null>(null)
   const [busy, setBusy] = useState(false)
   const [pollUntil, setPollUntil] = useState<number>(0)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
+    if (onDemand) return
     try {
       setRow(await fetchSyncStatus(domain))
     } catch (e: any) {
       setError(e.message || 'Failed to load sync status')
     }
-  }, [domain])
+  }, [domain, onDemand])
 
   useEffect(() => { load() }, [load])
 
@@ -63,6 +67,41 @@ export default function SyncFooter({ domain, actionLabel }: SyncFooterProps) {
     } finally {
       setBusy(false)
     }
+  }
+
+  if (onDemand) {
+    return (
+      <div style={{
+        marginTop: 24,
+        padding: '14px 18px',
+        borderRadius: 14,
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        boxShadow: 'var(--shadow-sm)',
+      }}>
+        <span style={{
+          width: 9, height: 9, borderRadius: '50%', background: 'var(--accent)',
+          boxShadow: '0 0 0 4px rgba(79,70,229,0.12)', flexShrink: 0,
+        }} />
+        <div>
+          <div style={{
+            fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: 'var(--text-faint)',
+          }}>
+            {DOMAIN_LABEL[domain]} data
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 600, marginTop: 1 }}>
+            Computed on demand
+            <span style={{ color: 'var(--text-muted)', fontWeight: 500, marginLeft: 6 }}>
+              · results cached for 24 hours · use the refresh controls above for live data
+            </span>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const running = row?.status === 'running' || busy

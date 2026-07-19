@@ -64,7 +64,7 @@ const FAQS: { section: string; items: FAQ[] }[] = [
     items: [
       {
         q: 'How does pricing work?',
-        a: <>$0 forever for one property on the Starter plan. Pro is $29 per property per month for up to 10 properties. Group pricing is volume-discounted — see <a href="/pricing" style={linkStyle}>Pricing</a>.</>,
+        a: <>Every account starts with a free 7-day Starter trial on one property — no card required. After that, Pro is $29.99 per property per month (up to 10 properties), or $24.99/mo billed annually. Group pricing is volume-discounted — see <a href="/pricing" style={linkStyle}>Pricing</a>.</>,
       },
       {
         q: 'Can I export my review data?',
