@@ -1,7 +1,5 @@
 ### Python template
 # Custom
-# migrations should be ignored until we are ready for production
-migrations/
 node_modules/
 sample_files/
 # mkdocs site
