@@ -44,7 +44,7 @@ const MENUS: NavMenu[] = [
       { label: 'About us', href: '/about', description: 'Our story and mission' },
       { label: 'Careers', href: '/about#careers', description: 'Join the team' },
       { label: 'Media', href: '/about#media', description: 'Press & brand assets' },
-      { label: 'Partners', href: '/about#partners', description: 'Integration partners' },
+      { label: 'Integrations', href: '/about#partners', description: 'The data sources we build on' },
       { label: 'Security', href: '/about#security', description: 'How we protect your data' },
     ],
   },
