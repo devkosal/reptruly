@@ -46,36 +46,95 @@ export default function Resources() {
         </p>
       </div>
 
-      <Section id="blog" title="Blog" sub="Hospitality reputation insights, written by the team">
+      <Section id="blog" title="Field notes" sub="Short observations from the data we work with — a full blog is coming">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-          <Card tag="2026-04-22" title="Why Expedia reviews skew lower than Booking" sub="Different traveler segments respond differently — and what to do about it." />
-          <Card tag="2026-04-08" title="Indy 500 weekend: what hotels are charging" sub="Pulled rate data from 20 properties around the Speedway over a 7-day window." />
-          <Card tag="2026-03-19" title="The 5-review Google cap (and how to live with it)" sub="Google's Place Details API only returns 5 reviews. Here's the workflow that still works." />
+          <Card tag="Note" title="Why Expedia reviews skew lower than Booking" sub="Different traveler segments respond differently — factor it in before comparing scores across channels." />
+          <Card tag="Note" title="Event weekends move rates days earlier than you think" sub="Comp sets around stadiums start climbing 10–14 days out. Watch the demand calendar, not the event date." />
+          <Card tag="Note" title="The 5-review Google cap (and how to live with it)" sub="Google's public data only ever exposes 5 reviews. Daily syncing accumulates history as they rotate." />
         </div>
       </Section>
 
-      <Section id="guides" title="Guides" sub="Practical playbooks">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-          <Card tag="Guide" title="How to respond to a 1-star review" sub="A four-step template, and three real examples we'd never use." />
-          <Card tag="Guide" title="Setting up rate alerts during local events" sub="Wire the demand calendar to your inbox so you never miss a pricing window." />
-          <Card tag="Guide" title="OTA reply etiquette across Booking, Expedia, Google" sub="Response styles vary by channel. Here's what works on each." />
-        </div>
+      <Section id="guides" title="Guides" sub="Practical playbooks — click to read">
+        <Guide title="How to respond to a 1-star review">
+          <ol style={{ paddingLeft: 20, display: 'grid', gap: 8 }}>
+            <li><strong>Reply within 24 hours.</strong> Future guests read the response date. A fast, calm reply to an angry review often does more for bookings than ten 9.0 scores.</li>
+            <li><strong>Thank, acknowledge, own.</strong> Open by thanking them for the feedback, name the specific problem ("you're right that the pool area closed early"), and own it without excuses. Never argue, never blame the guest — you're writing for the readers, not the reviewer.</li>
+            <li><strong>Say what changed.</strong> One concrete sentence: "We've changed the pool schedule and retrained the evening desk team." Vague promises ("we'll do better") read as nothing.</li>
+            <li><strong>Take it offline, then invite back.</strong> Offer a direct contact for unresolved issues and end with a genuine invitation to return. Keep the whole reply under 120 words.</li>
+          </ol>
+          <p style={{ marginTop: 10, fontSize: 13, color: 'var(--text-muted)' }}>
+            In reptruly: the <strong>🔥 Negative &amp; unanswered</strong> triage chip in the review inbox surfaces these first,
+            and the AI draft gives you a starting point in your configured tone.
+          </p>
+        </Guide>
+        <Guide title="Catching pricing windows around local events">
+          <ol style={{ paddingLeft: 20, display: 'grid', gap: 8 }}>
+            <li><strong>Check "Dates worth acting on."</strong> The demand calendar's action strip lists the highest-demand upcoming dates with the event driving each one.</li>
+            <li><strong>Click through to rates.</strong> Every flagged date has a "Check rates" shortcut that loads your comp set for that exact night — see what the market is already charging.</li>
+            <li><strong>Scan the 14-night outlook.</strong> On the Rates page, green cells mean you're 10%+ below market for that night — those are your raise candidates.</li>
+            <li><strong>Turn on rate movement alerts.</strong> Settings → Notifications → "Rate movement alerts" emails you when a competitor moves more than 10%, so you hear about the window even when you're not looking.</li>
+          </ol>
+        </Guide>
+        <Guide title="OTA reply etiquette: Booking vs. Expedia vs. Google">
+          <ul style={{ paddingLeft: 20, display: 'grid', gap: 8 }}>
+            <li><strong>Booking.com</strong> guests are often repeat business travelers — keep replies factual and efficient. Scores here are dimension-based, so address the specific low dimension (cleanliness, staff) rather than the overall number.</li>
+            <li><strong>Expedia</strong> skews leisure and family travel — a warmer, more personal tone lands better, and mentioning a specific detail from their stay goes a long way.</li>
+            <li><strong>Google</strong> replies are the most public — they appear directly in Maps and Search results next to your name. Write them for a first-time searcher: short, gracious, zero defensiveness. This is your storefront window.</li>
+            <li><strong>Everywhere:</strong> never paste the same reply twice in a row. Guests notice, and so do the OTA ranking systems.</li>
+          </ul>
+        </Guide>
       </Section>
 
-      <Section id="cases" title="Case studies" sub="How real hoteliers use reptruly">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-          <Card tag="Case study" title="Garnet Inn Group: 3 properties, one inbox" sub="How a Florida-NC family operation cut review-response time from 3 days to 4 hours." />
-          <Card tag="Case study" title="Trident Inn: turning Booking from 6.0 to 7.4 in nine months" sub="Reply rate, sentiment categorization, and what the AI summaries surfaced." />
+      <Section id="api" title="API reference" sub="Read-only access to your data — included with Pro">
+        <p style={{ marginBottom: 12 }}>
+          Create a key in <strong>Settings → API keys</strong>, then send it in an{' '}
+          <code style={codeStyle}>X-API-Key</code> header. All endpoints are read-only and scoped to your account.
+        </p>
+        <div style={{ display: 'grid', gap: 8, marginBottom: 14 }}>
+          <ApiRow method="GET" path="/api/v1/properties" desc="Your connected properties with their channel IDs" />
+          <ApiRow method="GET" path="/api/v1/reviews" desc="Reviews, paginated — filter by property_id, page, limit" />
+          <ApiRow method="GET" path="/api/v1/analytics/summary" desc="Review totals, average score, and per-OTA breakdown" />
+        </div>
+        <pre style={{
+          background: 'var(--ink)', color: '#e2e8f0', borderRadius: 10, padding: '14px 16px',
+          fontSize: 12.5, lineHeight: 1.6, overflowX: 'auto',
+        }}>
+{`curl -H "X-API-Key: rt_live_..." \\
+  https://reptruly.com/api/v1/analytics/summary`}
+        </pre>
+      </Section>
+
+      <Section id="cases" title="Case studies" sub="Coming from our first cohort">
+        <div style={{
+          border: '1px solid var(--border)', borderRadius: 14, padding: 20,
+          background: 'var(--surface)', boxShadow: 'var(--shadow-sm)',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+        }}>
+          <div style={{ maxWidth: 560 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>
+              We're onboarding our first hotel groups now
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              Run one property or a portfolio? Work directly with us during early access — and if reptruly
+              moves your reply times or scores, we'll feature your story here (with your approval, real numbers only).
+            </div>
+          </div>
+          <a href="/contact" className="btn btn-primary" style={{ textDecoration: 'none', flexShrink: 0 }}>
+            Get early access →
+          </a>
         </div>
       </Section>
 
       <Section id="changelog" title="Changelog" sub="What we shipped recently">
         <ul style={{ listStyle: 'none', padding: 0 }}>
           {[
-            { date: '2026-05-02', items: ['Added top navigation bar with Products/Pricing/Resources/Company menus', 'Built Pricing, Resources, About, Help, Contact pages'] },
-            { date: '2026-04-26', items: ['Per-OTA analytics tabs (All / Booking / Expedia / Google)', 'Reply button auto-labels by OTA', 'Property edit modal + remove links', 'Google reviews via Places API (New)'] },
-            { date: '2026-04-25', items: ['Demand calendar with month-by-month lazy loading + impact-weighted demand score (OpenAI-classified)', 'Expedia integration via Hotels.com Provider'] },
-            { date: '2026-04-24', items: ['Rates page with comp-set comparison + 24h cached daily refresh', 'Multi-select dropdown filters'] },
+            { date: '2026-07-19', items: ['Self-serve Group plan — pick your portfolio size, checkout at volume pricing', 'Review inbox triage presets (negative & unanswered · oldest · positive to thank) with sort orders', '"Mark handled" for replies posted on the OTA side', 'Settings cleanup with sticky section navigation', 'Pricing & Help accuracy pass'] },
+            { date: '2026-07-18', items: ['App shell redesign: properties sidebar + page tabs in the top bar', 'Dashboard property cards with per-property review stats and a tabbed property overview', '14-night rate outlook: your rate vs. market median per night', 'Demand calendar "Dates worth acting on" strip with rate check shortcuts', 'One period control on Analytics driving the page and the PDF report', 'Rates: market median, price-position insight, sortable comp table, hotels-only filter', 'Public read-only API with per-account keys'] },
+            { date: '2026-07-12', items: ['Stripe billing: checkout, customer portal, per-property quantities', 'Transactional emails + monthly owner report emails', 'Embeddable live review-score badge', 'Design system refresh across the whole app'] },
+            { date: '2026-05-24', items: ['Daily sync infrastructure for reviews, rates, and demand', 'Profile and settings UX'] },
+            { date: '2026-04-26', items: ['Per-OTA analytics tabs (All / Booking / Expedia / Google)', 'Property edit + remove', 'Google reviews via Places API (New)'] },
+            { date: '2026-04-25', items: ['Demand calendar with impact-weighted demand score (AI-classified events)', 'Expedia integration'] },
+            { date: '2026-04-24', items: ['Rates page with comp-set comparison + 24h cached daily refresh'] },
           ].map(entry => (
             <li key={entry.date} style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums', marginBottom: 6 }}>{entry.date}</div>
@@ -88,5 +147,53 @@ export default function Resources() {
       </Section>
       </PageContainer>
     </>
+  )
+}
+
+const codeStyle: React.CSSProperties = {
+  background: 'var(--surface-2)',
+  border: '1px solid var(--border)',
+  borderRadius: 6,
+  padding: '1px 6px',
+  fontSize: 12.5,
+}
+
+function Guide({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <details style={{
+      border: '1px solid var(--border)', borderRadius: 14, background: 'var(--surface)',
+      boxShadow: 'var(--shadow-sm)', padding: '0 16px', marginBottom: 10,
+    }}>
+      <summary style={{
+        cursor: 'pointer', padding: '14px 0', fontSize: 14, fontWeight: 700,
+        color: 'var(--ink)', listStyle: 'none', display: 'flex',
+        justifyContent: 'space-between', alignItems: 'center', gap: 12,
+      }}>
+        {title}
+        <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>▼</span>
+      </summary>
+      <div style={{ padding: '0 0 16px', fontSize: 13.5, color: 'var(--text)', lineHeight: 1.65 }}>
+        {children}
+      </div>
+    </details>
+  )
+}
+
+function ApiRow({ method, path, desc }: { method: string; path: string; desc: string }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      border: '1px solid var(--border)', borderRadius: 10, padding: '9px 12px',
+      background: 'var(--surface)',
+    }}>
+      <span style={{
+        fontSize: 11, fontWeight: 800, color: 'var(--good)', background: 'var(--good-soft)',
+        borderRadius: 6, padding: '2px 8px', letterSpacing: '0.04em',
+      }}>
+        {method}
+      </span>
+      <code style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink)' }}>{path}</code>
+      <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>{desc}</span>
+    </div>
   )
 }
