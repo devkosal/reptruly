@@ -34,11 +34,19 @@ const FAQS: { section: string; items: FAQ[] }[] = [
       },
       {
         q: 'Why am I only getting 5 Google reviews?',
-        a: <>Google itself caps the number of reviews available per property to 5 in their public data feed. We pull the latest 5 every day, and since the "latest 5" rotate as new reviews come in, your account naturally accumulates more over time. If you need a full historical backfill of every Google review your property has ever received, that's available on the Pro and Group plans — <a href="/contact" style={linkStyle}>contact us</a> to enable it.</>,
+        a: <>Google itself caps the number of reviews available per property to 5 in their public data feed — no tool can pull more. We fetch the latest 5 every day, and since those rotate as new reviews come in, your account naturally accumulates Google review history over time.</>,
       },
       {
         q: 'Can I reply to reviews from inside reptruly?',
         a: <>No — none of the OTAs expose a programmatic reply API to non-channel-manager partners. The Reply button deep-links you to each OTA's own extranet (Booking partner, Expedia Partner Central, Google Business Profile) where you can post your reply.</>,
+      },
+      {
+        q: 'How do AI reply drafts work?',
+        a: <>On Pro, every review gets an <strong>AI draft</strong> button, and with "Suggest replies automatically" on, drafts are pre-generated during the nightly sync (you'll see a "Draft ready" chip). Set the tone, language, and signature in Settings → AI replies. Edit the draft, then <em>Copy &amp; open</em> jumps you to the OTA's reply page with the text on your clipboard.</>,
+      },
+      {
+        q: 'What does "Mark handled" do?',
+        a: <>It tells reptruly you already replied on the OTA's site. The review immediately leaves the "Needs reply" pile and the triage counts, and shows a ☑ Handled chip until the next sync confirms the reply on the OTA's side. Undo it anytime from the Any-status view.</>,
       },
     ],
   },
@@ -57,6 +65,27 @@ const FAQS: { section: string; items: FAQ[] }[] = [
         q: 'Why does weather show "n/a" past two weeks?',
         a: <>Open-Meteo (our weather provider, free) only forecasts ~16 days into the future. Holidays and events still populate further out, but weather will be blank.</>,
       },
+      {
+        q: 'Where does the 14-night rate outlook get its data?',
+        a: <>From data you already have: today's cached rate lookups plus the daily snapshots the rates sync records — showing the outlook costs nothing. Nights with no data yet show a <em>Fetch missing nights</em> button that pulls them live from Booking.com (a few seconds per night, then cached for 24 hours). The market median honors the "Hotels only" filter.</>,
+      },
+    ],
+  },
+  {
+    section: 'Reports & sharing',
+    items: [
+      {
+        q: 'How do I get a PDF report?',
+        a: <>On the Analytics page, pick a period and click <strong>Hotel analytics report (PDF)</strong>. It covers the selected property (or all properties) for that exact period: review volumes, average scores and trends per OTA — plus AI insights and topic scores on Pro.</>,
+      },
+      {
+        q: 'What is the monthly owner report?',
+        a: <>An email on the 1st of each month with last month's numbers per property and a link to the printable report — handy for owners and investors. Toggle it in Settings → Notifications.</>,
+      },
+      {
+        q: 'What is the website badge?',
+        a: <>A live review-score badge you can embed on your own site — it updates automatically as reviews sync. Grab the embed code in Settings → Badge; it works anywhere an image tag works (Wix, Squarespace, WordPress, plain HTML).</>,
+      },
     ],
   },
   {
@@ -64,15 +93,19 @@ const FAQS: { section: string; items: FAQ[] }[] = [
     items: [
       {
         q: 'How does pricing work?',
-        a: <>Every account starts with a free 7-day Starter trial on one property — no card required. After that, Pro is $29.99 per property per month (up to 10 properties), or $24.99/mo billed annually. Group pricing is volume-discounted — see <a href="/pricing" style={linkStyle}>Pricing</a>.</>,
+        a: <>Every account starts with a free 7-day Starter trial on one property — no card required. After that, Pro is $29.99 per property per month (up to 10 properties), or ≈$24.99/mo when billed annually. Group pricing is volume-discounted for 10+ properties — see <a href="/pricing" style={linkStyle}>Pricing</a>.</>,
+      },
+      {
+        q: 'What happens when my trial ends?',
+        a: <>Nothing is deleted. Your synced reviews and analytics stay readable — syncing and gated features simply pause until you upgrade to Pro.</>,
       },
       {
         q: 'Can I export my review data?',
-        a: <>Yes — use the <strong>Export CSV</strong> button at the top of your review inbox. It downloads whatever the current filters show (property, channel, score range, dates). Need programmatic access instead? <a href="/contact" style={linkStyle}>Contact us</a> — we'd love to hear your use case.</>,
+        a: <>Yes, two ways. <strong>Export CSV</strong> at the top of the review inbox downloads whatever the current filters show. For programmatic access, Pro plans include a read-only API: create a key in Settings → API keys and send it in an <code>X-API-Key</code> header to pull your properties, reviews, and analytics.</>,
       },
       {
         q: 'What if I want to cancel?',
-        a: <>Cancel anytime from Settings → Billing. Your data stays in our DB for 30 days after cancellation in case you change your mind, then is permanently deleted.</>,
+        a: <>Cancel anytime from Settings → Billing (the Stripe portal). Your plan runs to the end of the current billing period, and your data stays in your account — readable even after the plan lapses. Want everything erased? <a href="/contact" style={linkStyle}>Contact us</a> and we'll delete your account and data.</>,
       },
     ],
   },
@@ -81,13 +114,19 @@ const FAQS: { section: string; items: FAQ[] }[] = [
 export default function Help() {
   useDocumentTitle('Help')
   const [openKey, setOpenKey] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+
+  const q = query.trim().toLowerCase()
+  const visibleFaqs = FAQS
+    .map(g => ({ ...g, items: q ? g.items.filter(it => it.q.toLowerCase().includes(q)) : g.items }))
+    .filter(g => g.items.length > 0)
 
   return (
     <>
       <TopNav />
       <PageContainer>
 
-      <div style={{ marginBottom: 32, marginTop: 24 }}>
+      <div style={{ marginBottom: 24, marginTop: 24 }}>
         <h1 style={{ fontSize: 36, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--ink)', marginBottom: 8 }}>
           Help center
         </h1>
@@ -97,7 +136,23 @@ export default function Help() {
         </p>
       </div>
 
-      {FAQS.map(group => (
+      <input
+        type="search"
+        className="filter-input"
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        placeholder="Type to filter questions… (e.g. Google, cancel, PDF)"
+        style={{ width: '100%', maxWidth: 480, marginBottom: 28, fontSize: 14 }}
+      />
+
+      {visibleFaqs.length === 0 && (
+        <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 32 }}>
+          No questions match "{query}" — try another word or{' '}
+          <a href="/contact" style={linkStyle}>ask us directly</a>.
+        </p>
+      )}
+
+      {visibleFaqs.map(group => (
         <div key={group.section} style={{ marginBottom: 32 }}>
           <h2 style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>
             {group.section}
