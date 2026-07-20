@@ -28,19 +28,25 @@ export default function About() {
         </p>
       </div>
 
-      <Section id="story" title="Why we're building this">
+      <Section id="story" title="Our story">
         <p style={{ marginBottom: 10 }}>
-          Running a small hotel means living in four browser tabs and a spreadsheet: Booking's
-          extranet for reviews, Expedia's for more reviews, Google for the ones that show up in
-          search, and someone's rate-shopping notes for what the hotel across the street charges
-          tonight. The tools that solve this properly are built for chains — $200 per property per
-          month, annual contracts, and onboarding calls before you see a screen.
+          reptruly started at a family front desk — ours. Our family runs hotels, and for years
+          the evening ritual looked the same: Booking's extranet open in one tab, Expedia's in
+          another, Google reviews in a third, and a scribbled note about what the hotel down the
+          road was charging that night. A harsh review would sit unanswered for days simply because
+          nobody saw it — and future guests <em>did</em> see it, right at the top, with no reply.
+        </p>
+        <p style={{ marginBottom: 10 }}>
+          The tools that solve this properly are built for chains: $200 per property per month,
+          annual contracts, onboarding calls before you ever see a screen. Nobody builds for the
+          family operation where the person answering reviews also fixes the ice machine.
         </p>
         <p>
-          reptruly is the simpler version: paste your OTA links, and reviews, comp-set rates, and
-          local demand start syncing the same day. Priced per property, cancel anytime, no sales
-          call required. It's early — the <a href="/resources#changelog" style={{ color: 'var(--accent)', fontWeight: 600 }}>changelog</a> shows
-          exactly what ships and when.
+          So we built reptruly the way our own family would use it: paste your OTA links, and your
+          reviews, comp-set rates, and local demand are in one workspace the same day. Every feature
+          exists because it earned its keep at a real front desk — and the{' '}
+          <a href="/resources#changelog" style={{ color: 'var(--accent)', fontWeight: 600 }}>changelog</a> shows
+          exactly what ships, week by week.
         </p>
       </Section>
 

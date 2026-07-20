@@ -43,15 +43,12 @@ export type BillingPlan = 'pro' | 'group'
 
 /** Create a Stripe Checkout session and return its URL to redirect to.
 
-    Group checkout declares the portfolio size (min 11 properties) so the
-    volume price starts at the right billed quantity. */
+    Group eligibility (10+ connected properties) is verified server-side. */
 export async function startCheckout(
   interval: BillingInterval = 'month',
   plan: BillingPlan = 'pro',
-  properties = 0,
 ): Promise<string> {
   const params = new URLSearchParams({ interval, plan })
-  if (properties > 0) params.set('properties', String(properties))
   const res = await fetch(`/api/billing/checkout?${params}`, {
     method: 'POST',
     credentials: 'include',
@@ -59,6 +56,17 @@ export async function startCheckout(
   if (!res.ok) throw new Error(await parseError(res, `Checkout failed (${res.status})`))
   const data = await res.json()
   return data.url
+}
+
+/** Move an active Pro subscription to Group volume pricing (prorated).
+    Requires 10+ connected properties — verified server-side. */
+export async function switchToGroup(): Promise<BillingStatus> {
+  const res = await fetch('/api/billing/switch-to-group', {
+    method: 'POST',
+    credentials: 'include',
+  })
+  if (!res.ok) throw new Error(await parseError(res, `Switch failed (${res.status})`))
+  return res.json()
 }
 
 /** Sync the subscription after Stripe redirects back with a session_id. */

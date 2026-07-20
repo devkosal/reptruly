@@ -319,3 +319,40 @@ class TestGroupPlan:
         with patch("reptruly.billing.api.controllers.stripe") as stripe_mock:
             assert _group_price().id == existing.id
         stripe_mock.Price.create.assert_not_called()
+
+
+class TestGroupEligibility:
+    """Group is verified by connected properties — no self-declaration."""
+
+    def test_checkout_group_rejected_below_threshold(self, client):
+        user = UserFactory()
+        _add_properties(user, 5)
+        client.force_login(user)
+        res = client.post("/api/billing/checkout?plan=group")
+        assert res.status_code == 400
+        assert "you have 5" in res.json()["detail"]
+
+    def test_switch_requires_active_subscription(self, client):
+        user = UserFactory()
+        _add_properties(user, 10)
+        client.force_login(user)
+        res = client.post("/api/billing/switch-to-group")
+        assert res.status_code == 400
+        assert "checkout" in res.json()["detail"]
+
+    def test_switch_rejected_below_threshold(self, client):
+        from djstripe.models import Customer, Subscription
+
+        user = UserFactory()
+        _add_properties(user, 4)
+        customer = Customer.objects.create(id=f"cus_sw_{user.pk}")
+        user.customer = customer
+        user.save(update_fields=["customer"])
+        Subscription.objects.create(
+            id=f"sub_sw_{user.pk}", customer=customer,
+            stripe_data={"status": "active"},
+        )
+        client.force_login(user)
+        res = client.post("/api/billing/switch-to-group")
+        assert res.status_code == 400
+        assert "you have 4" in res.json()["detail"]

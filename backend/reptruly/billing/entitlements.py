@@ -59,10 +59,10 @@ PRO = Plan(
     rate_shopping=True,
 )
 
-# Group: self-serve volume plan for portfolios beyond Pro's 10-property cap.
-# Billing never drops below GROUP_MIN_PROPERTIES units so the volume price
-# can't undercut Pro for small portfolios.
-GROUP_MIN_PROPERTIES = 11
+# Group: self-serve volume plan, unlocked by actually having 10+ connected
+# properties (verified server-side — no sales call). Billing never drops below
+# GROUP_MIN_PROPERTIES units so the volume price can't undercut Pro.
+GROUP_MIN_PROPERTIES = 10
 GROUP_PRICE_LOOKUP_KEY = "reptruly_group_month"
 
 GROUP = Plan(

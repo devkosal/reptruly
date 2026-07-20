@@ -209,13 +209,13 @@ class BillingAPI:
         return _status_payload(user)
 
     @route.post("/checkout", response=CheckoutOut)
-    def checkout(self, request, interval: str = "month", plan: str = "pro", properties: int = 0):
+    def checkout(self, request, interval: str = "month", plan: str = "pro"):
         """Create a Stripe Checkout Session for a subscription.
 
         ``plan`` is "pro" (default) or "group". Pro: ``interval`` "month" or
         "year" (2 months free), one unit per connected property. Group:
-        month-only volume pricing; ``properties`` declares the portfolio size
-        (min 11 — Pro covers up to 10) and seeds the billed quantity.
+        month-only volume pricing, unlocked by having GROUP_MIN_PROPERTIES+
+        connected properties — verified here, no self-declaration.
         """
         user = _require_user(request)
         if plan not in ("pro", "group"):
@@ -224,18 +224,18 @@ class BillingAPI:
             raise HttpError(400, "interval must be 'month' or 'year'")
         if active_subscription(user) is not None:
             raise HttpError(409, "Already subscribed — manage your plan from the billing portal")
-        customer = _get_or_create_customer(user)
         if plan == "group":
-            if properties < GROUP_MIN_PROPERTIES:
+            count = user.properties.count()
+            if count < GROUP_MIN_PROPERTIES:
                 raise HttpError(
                     400,
-                    f"Group is for {GROUP_MIN_PROPERTIES}+ properties — "
-                    "Pro covers portfolios up to 10.",
+                    f"Group unlocks at {GROUP_MIN_PROPERTIES}+ connected properties — "
+                    f"you have {count}. Start with Pro and switch any time.",
                 )
+        customer = _get_or_create_customer(user)
+        if plan == "group":
             price = _group_price()
-            quantity = min(
-                max(properties, user.properties.count()), GROUP.max_properties
-            )
+            quantity = min(user.properties.count(), GROUP.max_properties)
         else:
             price = _pro_price(interval)
             quantity = desired_quantity(user)
@@ -282,6 +282,45 @@ class BillingAPI:
             send_pro_subscription_emails(user)
             # Property count may have changed between session creation and payment.
             sync_subscription_quantity(user)
+        return _status_payload(user)
+
+    @route.post("/switch-to-group", response=BillingStatusOut)
+    def switch_to_group(self, request):
+        """Move an active Pro subscription to Group volume pricing in place.
+
+        Self-serve and verified: requires GROUP_MIN_PROPERTIES+ connected
+        properties. Stripe prorates the change on the next invoice.
+        """
+        user = _require_user(request)
+        sub = active_subscription(user)
+        if sub is None:
+            raise HttpError(400, "No active subscription — use checkout instead")
+        if subscription_plan(sub) is GROUP:
+            return _status_payload(user)
+        count = user.properties.count()
+        if count < GROUP_MIN_PROPERTIES:
+            raise HttpError(
+                400,
+                f"Group unlocks at {GROUP_MIN_PROPERTIES}+ connected properties — "
+                f"you have {count}.",
+            )
+        item = sub.items.first()
+        if item is None:
+            raise HttpError(502, "Subscription has no billable items")
+        price = _group_price()
+        try:
+            stripe.Subscription.modify(
+                sub.id,
+                items=[{
+                    "id": item.id,
+                    "price": price.id,
+                    "quantity": min(count, GROUP.max_properties),
+                }],
+                proration_behavior="create_prorations",
+            )
+            Subscription.sync_from_stripe_data(stripe.Subscription.retrieve(sub.id))
+        except StripeError as e:
+            raise HttpError(502, f"Stripe error: {e.user_message or e}")
         return _status_payload(user)
 
     @route.post("/portal", response=PortalOut)

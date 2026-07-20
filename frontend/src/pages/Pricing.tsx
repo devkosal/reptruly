@@ -3,7 +3,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import TopNav from '../components/TopNav'
 import PageContainer from '../components/PageContainer'
 import { useAuth } from '../context/AuthContext'
-import { BillingInterval, BillingStatus, fetchBillingStatus, startCheckout } from '../api/billing'
+import { useProperty } from '../context/PropertyContext'
+import {
+  BillingInterval, BillingStatus, fetchBillingStatus, startCheckout, switchToGroup,
+} from '../api/billing'
 import useDocumentTitle from '../hooks/useDocumentTitle'
 
 interface Tier {
@@ -70,12 +73,12 @@ const TIERS: Tier[] = [
     name: 'Group',
     price: '$15',
     cadence: 'per property / month',
-    description: 'For chains and management companies running 11+ properties.',
+    description: 'Unlocks automatically at 10+ connected properties.',
     features: [
-      'Everything in Pro',
-      'More than 10 properties',
-      'Half the per-property price of Pro',
-      'Priority onboarding for your portfolio',
+      'Everything in Pro, half the per-property price',
+      'Eligibility verified by your connected portfolio — no sales call',
+      'On Pro already? Switch in one click, prorated by Stripe',
+      'Property limit lifts to your whole portfolio',
       'Questions first? We\'re happy to talk',
     ],
     ctaLabel: 'Get Group →',
@@ -83,15 +86,18 @@ const TIERS: Tier[] = [
   },
 ]
 
-function TierCta({ tier, interval, status }: {
+function TierCta({ tier, interval, status, onStatus }: {
   tier: Tier
   interval: BillingInterval
   status: BillingStatus | null
+  onStatus: (s: BillingStatus) => void
 }) {
   const { user } = useAuth()
+  const { properties } = useProperty()
   const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [switched, setSwitched] = useState(false)
 
   const style: CSSProperties = {
     display: 'block',
@@ -137,23 +143,36 @@ function TierCta({ tier, interval, status }: {
   const isGroupSub = planName === 'Group'
   const isPro = isPaid && !isGroupSub
 
-  // Group is self-serve: pick your portfolio size, check out at $15/property.
-  const GROUP_MIN = 11
-  const [groupProps, setGroupProps] = useState(12)
-  const groupValid = groupProps >= GROUP_MIN
+  // Group eligibility is verified — it unlocks from the connected portfolio.
+  const GROUP_MIN = 10
+  const propertyCount = user ? properties.length : 0
+  const groupEligible = propertyCount >= GROUP_MIN
 
   async function onGroupCheckout() {
     if (!user) {
       navigate('/login')
       return
     }
-    if (!groupValid) return
     setBusy(true)
     setError('')
     try {
-      window.location.href = await startCheckout('month', 'group', groupProps)
+      window.location.href = await startCheckout('month', 'group')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Checkout failed')
+      setBusy(false)
+    }
+  }
+
+  async function onSwitchToGroup() {
+    setBusy(true)
+    setError('')
+    try {
+      const next = await switchToGroup()
+      onStatus(next)
+      setSwitched(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Switch failed')
+    } finally {
       setBusy(false)
     }
   }
@@ -170,17 +189,66 @@ function TierCta({ tier, interval, status }: {
             fontWeight: 700,
             cursor: 'default',
           }}>
-            ✓ Your current plan
+            {switched ? '✓ Switched to Group' : '✓ Your current plan'}
           </div>
           <p style={{ fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20, color: 'var(--text-faint)' }}>
-            {status?.quantity ? `${status.quantity} properties billed · ` : ''}
+            {status?.quantity ? `${status.quantity} properties billed at $15 · ` : ''}
             <Link to="/settings" style={{ color: 'var(--accent)', fontWeight: 600 }}>Manage billing in Settings</Link>
           </p>
         </>
       )
     }
     if (isPro) {
+      if (groupEligible) {
+        return (
+          <>
+            <button onClick={onSwitchToGroup} disabled={busy} style={{ ...style, opacity: busy ? 0.6 : 1 }}>
+              {busy ? 'Switching…' : `Switch to Group — $15 × ${propertyCount} properties`}
+            </button>
+            <p style={{ fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20, color: 'var(--text-faint)' }}>
+              Prorated by Stripe on your next invoice
+            </p>
+            {error && (
+              <p style={{ color: 'var(--bad)', fontSize: 12, marginTop: -16, marginBottom: 16 }}>{error}</p>
+            )}
+          </>
+        )
+      }
       return (
+        <>
+          <div style={{
+            ...style,
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            color: 'var(--text-muted)',
+            cursor: 'default',
+            fontSize: 13,
+          }}>
+            Unlocks at {GROUP_MIN}+ connected properties
+          </div>
+          <p style={{ fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20, color: 'var(--text-faint)' }}>
+            You have {propertyCount} — connect more and this switches on automatically
+          </p>
+        </>
+      )
+    }
+    if (user && status && groupEligible) {
+      return (
+        <>
+          <button onClick={onGroupCheckout} disabled={busy} style={{ ...style, opacity: busy ? 0.6 : 1 }}>
+            {busy ? 'Redirecting…' : `Get Group — $15 × ${propertyCount} properties`}
+          </button>
+          <p style={{ fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20, color: 'var(--text-faint)' }}>
+            ${(propertyCount * 15).toLocaleString()}/mo · billed monthly · cancel anytime
+          </p>
+          {error && (
+            <p style={{ color: 'var(--bad)', fontSize: 12, marginTop: -16, marginBottom: 16 }}>{error}</p>
+          )}
+        </>
+      )
+    }
+    return (
+      <>
         <div style={{
           ...style,
           background: 'var(--surface-2)',
@@ -189,38 +257,12 @@ function TierCta({ tier, interval, status }: {
           cursor: 'default',
           fontSize: 13,
         }}>
-          Growing past 10? <a href="/contact" style={{ color: 'var(--accent)', fontWeight: 600 }}>Contact us</a> to switch from Pro
+          Unlocks at {GROUP_MIN}+ connected properties
         </div>
-      )
-    }
-    return (
-      <>
-        <label style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-          marginBottom: 10, fontSize: 13, fontWeight: 600, color: 'var(--text)',
-        }}>
-          How many properties?
-          <input
-            type="number"
-            min={GROUP_MIN}
-            max={1000}
-            value={groupProps}
-            onChange={e => setGroupProps(Number(e.target.value) || 0)}
-            className="filter-input"
-            style={{ width: 90, textAlign: 'center', fontWeight: 700 }}
-          />
-        </label>
-        <button onClick={onGroupCheckout} disabled={busy || !groupValid} style={{ ...style, opacity: busy || !groupValid ? 0.6 : 1 }}>
-          {busy ? 'Redirecting…' : tier.ctaLabel}
-        </button>
-        <p style={{ fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20, color: groupValid ? 'var(--text-faint)' : 'var(--warn)' }}>
-          {groupValid
-            ? `$15 × ${groupProps} = $${(groupProps * 15).toLocaleString()}/mo · billed monthly · cancel anytime`
-            : `Group starts at ${GROUP_MIN} properties — Pro covers up to 10`}
+        <p style={{ fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20, color: 'var(--text-faint)' }}>
+          Start on Pro — Group switches on automatically as your portfolio grows.{' '}
+          <a href="/contact" style={{ color: 'var(--accent)', fontWeight: 600 }}>Questions?</a>
         </p>
-        {error && (
-          <p style={{ color: 'var(--bad)', fontSize: 12, marginTop: -16, marginBottom: 16 }}>{error}</p>
-        )}
       </>
     )
   }
@@ -438,7 +480,7 @@ export default function Pricing() {
                 {billingInterval === 'year' && t.cadenceAnnual ? t.cadenceAnnual : t.cadence}
               </span>
             </div>
-            <TierCta tier={t} interval={billingInterval} status={status} />
+            <TierCta tier={t} interval={billingInterval} status={status} onStatus={setStatus} />
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {t.features.map(f => (
                 <li key={f} style={{ display: 'flex', gap: 8, padding: '6px 0', fontSize: 13, color: t.highlight ? 'rgba(255,255,255,0.75)' : 'var(--text)' }}>
