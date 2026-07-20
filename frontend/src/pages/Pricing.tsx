@@ -68,17 +68,17 @@ const TIERS: Tier[] = [
   },
   {
     name: 'Group',
-    price: 'From $15',
+    price: '$15',
     cadence: 'per property / month',
-    description: 'For chains and management companies running 10+ properties.',
+    description: 'For chains and management companies running 11+ properties.',
     features: [
       'Everything in Pro',
       'More than 10 properties',
-      'Volume pricing — the more properties, the less per property',
+      'Half the per-property price of Pro',
       'Priority onboarding for your portfolio',
-      'Invoice billing available',
+      'Questions first? We\'re happy to talk',
     ],
-    ctaLabel: 'Contact sales',
+    ctaLabel: 'Get Group →',
     ctaHref: '/contact',
   },
 ]
@@ -132,9 +132,113 @@ function TierCta({ tier, interval, status }: {
     </p>
   ) : null
 
-  const isPro = !!status?.has_pro
+  const isPaid = !!status?.has_pro
+  const planName = status?.plan
+  const isGroupSub = planName === 'Group'
+  const isPro = isPaid && !isGroupSub
+
+  // Group is self-serve: pick your portfolio size, check out at $15/property.
+  const GROUP_MIN = 11
+  const [groupProps, setGroupProps] = useState(12)
+  const groupValid = groupProps >= GROUP_MIN
+
+  async function onGroupCheckout() {
+    if (!user) {
+      navigate('/login')
+      return
+    }
+    if (!groupValid) return
+    setBusy(true)
+    setError('')
+    try {
+      window.location.href = await startCheckout('month', 'group', groupProps)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Checkout failed')
+      setBusy(false)
+    }
+  }
+
+  if (tier.name === 'Group') {
+    if (isGroupSub) {
+      return (
+        <>
+          <div style={{
+            ...style,
+            background: 'var(--good-soft)',
+            border: '1px solid #c4ebda',
+            color: 'var(--good)',
+            fontWeight: 700,
+            cursor: 'default',
+          }}>
+            ✓ Your current plan
+          </div>
+          <p style={{ fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20, color: 'var(--text-faint)' }}>
+            {status?.quantity ? `${status.quantity} properties billed · ` : ''}
+            <Link to="/settings" style={{ color: 'var(--accent)', fontWeight: 600 }}>Manage billing in Settings</Link>
+          </p>
+        </>
+      )
+    }
+    if (isPro) {
+      return (
+        <div style={{
+          ...style,
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border)',
+          color: 'var(--text-muted)',
+          cursor: 'default',
+          fontSize: 13,
+        }}>
+          Growing past 10? <a href="/contact" style={{ color: 'var(--accent)', fontWeight: 600 }}>Contact us</a> to switch from Pro
+        </div>
+      )
+    }
+    return (
+      <>
+        <label style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+          marginBottom: 10, fontSize: 13, fontWeight: 600, color: 'var(--text)',
+        }}>
+          How many properties?
+          <input
+            type="number"
+            min={GROUP_MIN}
+            max={1000}
+            value={groupProps}
+            onChange={e => setGroupProps(Number(e.target.value) || 0)}
+            className="filter-input"
+            style={{ width: 90, textAlign: 'center', fontWeight: 700 }}
+          />
+        </label>
+        <button onClick={onGroupCheckout} disabled={busy || !groupValid} style={{ ...style, opacity: busy || !groupValid ? 0.6 : 1 }}>
+          {busy ? 'Redirecting…' : tier.ctaLabel}
+        </button>
+        <p style={{ fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20, color: groupValid ? 'var(--text-faint)' : 'var(--warn)' }}>
+          {groupValid
+            ? `$15 × ${groupProps} = $${(groupProps * 15).toLocaleString()}/mo · billed monthly · cancel anytime`
+            : `Group starts at ${GROUP_MIN} properties — Pro covers up to 10`}
+        </p>
+        {error && (
+          <p style={{ color: 'var(--bad)', fontSize: 12, marginTop: -16, marginBottom: 16 }}>{error}</p>
+        )}
+      </>
+    )
+  }
 
   // Plan-aware states for signed-in users.
+  if (tier.name === 'Pro' && isGroupSub) {
+    return (
+      <div style={{
+        ...style,
+        background: 'rgba(255,255,255,0.08)',
+        border: '1px solid rgba(255,255,255,0.14)',
+        color: 'rgba(255,255,255,0.6)',
+        cursor: 'default',
+      }}>
+        Included in your Group plan
+      </div>
+    )
+  }
   if (tier.name === 'Pro' && isPro) {
     return (
       <>
@@ -160,7 +264,7 @@ function TierCta({ tier, interval, status }: {
     )
   }
   if (tier.name === 'Starter' && user && status) {
-    if (isPro) {
+    if (isPaid) {
       return (
         <div style={{
           ...style,
@@ -169,7 +273,7 @@ function TierCta({ tier, interval, status }: {
           color: 'var(--text-faint)',
           cursor: 'default',
         }}>
-          Covered by your Pro plan
+          Covered by your {planName} plan
         </div>
       )
     }

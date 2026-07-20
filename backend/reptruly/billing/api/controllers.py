@@ -10,10 +10,14 @@ from ninja_extra import api_controller, route
 from stripe import StripeError
 
 from reptruly.billing.entitlements import (
+    GROUP,
+    GROUP_MIN_PROPERTIES,
+    GROUP_PRICE_LOOKUP_KEY,
     STARTER,
     active_subscription,
     get_plan,
     starter_trial_days_left,
+    subscription_plan,
 )
 from reptruly.billing.quantity import desired_quantity, sync_subscription_quantity
 from reptruly.billing.utils import set_stripe_api_key
@@ -105,6 +109,39 @@ def _pro_price(interval: str = "month") -> Price:
     return price
 
 
+GROUP_UNIT_AMOUNT = 1500  # $15.00 per property per month
+
+
+def _group_price() -> Price:
+    """The Group volume price: explicit setting, then lookup key, else create it.
+
+    First Group checkout ever creates the Stripe product + price (idempotent
+    thereafter via the lookup key) so no manual dashboard setup is needed.
+    """
+    from djstripe.models import Product
+
+    price_id = getattr(settings, "STRIPE_GROUP_PRICE_ID", "")
+    qs = Price.objects.filter(active=True)
+    price = qs.filter(id=price_id).first() if price_id else None
+    if price is None:
+        price = qs.filter(stripe_data__lookup_key=GROUP_PRICE_LOOKUP_KEY).first()
+    if price is None:
+        try:
+            stripe_price = stripe.Price.create(
+                unit_amount=GROUP_UNIT_AMOUNT,
+                currency="usd",
+                recurring={"interval": "month"},
+                lookup_key=GROUP_PRICE_LOOKUP_KEY,
+                metadata={"reptruly_plan": "group"},
+                product_data={"name": "reptruly Group"},
+            )
+            Product.sync_from_stripe_data(stripe.Product.retrieve(stripe_price.product))
+            price = Price.sync_from_stripe_data(stripe_price)
+        except StripeError as e:
+            raise HttpError(502, f"Could not set up Group pricing: {e.user_message or e}")
+    return price
+
+
 def _origin(request) -> str:
     return f"{request.scheme}://{request.get_host()}"
 
@@ -142,7 +179,7 @@ def _status_payload(user) -> dict:
     trial_end = sub_data.get("trial_end")
     return {
         "has_pro": True,
-        "plan": "Pro",
+        "plan": subscription_plan(sub).name,
         "limits": _plan_limits(user),
         "price": price_data.get("unit_amount"),
         "quantity": quantity,
@@ -172,26 +209,44 @@ class BillingAPI:
         return _status_payload(user)
 
     @route.post("/checkout", response=CheckoutOut)
-    def checkout(self, request, interval: str = "month"):
-        """Create a Stripe Checkout Session for the Pro subscription.
+    def checkout(self, request, interval: str = "month", plan: str = "pro", properties: int = 0):
+        """Create a Stripe Checkout Session for a subscription.
 
-        ``interval`` is "month" (default) or "year" (2 months free).
+        ``plan`` is "pro" (default) or "group". Pro: ``interval`` "month" or
+        "year" (2 months free), one unit per connected property. Group:
+        month-only volume pricing; ``properties`` declares the portfolio size
+        (min 11 — Pro covers up to 10) and seeds the billed quantity.
         """
         user = _require_user(request)
+        if plan not in ("pro", "group"):
+            raise HttpError(400, "plan must be 'pro' or 'group'")
         if interval not in ("month", "year"):
             raise HttpError(400, "interval must be 'month' or 'year'")
         if active_subscription(user) is not None:
-            raise HttpError(409, "Already subscribed to Pro")
+            raise HttpError(409, "Already subscribed — manage your plan from the billing portal")
         customer = _get_or_create_customer(user)
-        price = _pro_price(interval)
+        if plan == "group":
+            if properties < GROUP_MIN_PROPERTIES:
+                raise HttpError(
+                    400,
+                    f"Group is for {GROUP_MIN_PROPERTIES}+ properties — "
+                    "Pro covers portfolios up to 10.",
+                )
+            price = _group_price()
+            quantity = min(
+                max(properties, user.properties.count()), GROUP.max_properties
+            )
+        else:
+            price = _pro_price(interval)
+            quantity = desired_quantity(user)
         origin = _origin(request)
         try:
             session = stripe.checkout.Session.create(
                 customer=customer.id,
                 mode="subscription",
-                # Pro is per property per month — bill one unit per connected property.
-                # No Pro trial: the free trial is the 7-day Starter period.
-                line_items=[{"price": price.id, "quantity": desired_quantity(user)}],
+                # Per property per month — bill one unit per property.
+                # No paid trial: the free trial is the 7-day Starter period.
+                line_items=[{"price": price.id, "quantity": quantity}],
                 success_url=(
                     f"{origin}/settings?billing=success"
                     "&session_id={CHECKOUT_SESSION_ID}"

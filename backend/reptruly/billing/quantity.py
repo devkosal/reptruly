@@ -9,15 +9,26 @@ import logging
 import stripe
 from djstripe.models import Subscription
 
-from reptruly.billing.entitlements import PRO, active_subscription
+from reptruly.billing.entitlements import (
+    GROUP,
+    GROUP_MIN_PROPERTIES,
+    PRO,
+    active_subscription,
+    subscription_plan,
+)
 from reptruly.billing.utils import set_stripe_api_key
 
 logger = logging.getLogger(__name__)
 
 
-def desired_quantity(user) -> int:
-    """Billable quantity: one per connected property, min 1, capped at plan max."""
+def desired_quantity(user, plan=PRO) -> int:
+    """Billable quantity: one per connected property, capped at the plan max.
+
+    Pro floors at 1; Group floors at GROUP_MIN_PROPERTIES so volume pricing
+    can't undercut Pro while a portfolio is still being connected."""
     count = user.properties.count()
+    if plan is GROUP:
+        return max(GROUP_MIN_PROPERTIES, min(count, GROUP.max_properties))
     return max(1, min(count, PRO.max_properties))
 
 
@@ -35,7 +46,7 @@ def sync_subscription_quantity(user) -> None:
         if item is None:
             return
         current = (item.stripe_data or {}).get("quantity") or 1
-        target = desired_quantity(user)
+        target = desired_quantity(user, subscription_plan(sub))
         if current == target:
             return
         set_stripe_api_key()

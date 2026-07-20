@@ -59,6 +59,35 @@ PRO = Plan(
     rate_shopping=True,
 )
 
+# Group: self-serve volume plan for portfolios beyond Pro's 10-property cap.
+# Billing never drops below GROUP_MIN_PROPERTIES units so the volume price
+# can't undercut Pro for small portfolios.
+GROUP_MIN_PROPERTIES = 11
+GROUP_PRICE_LOOKUP_KEY = "reptruly_group_month"
+
+GROUP = Plan(
+    name="Group",
+    max_properties=1000,
+    allowed_otas=frozenset({OTA_BOOKING, OTA_EXPEDIA, OTA_GOOGLE}),
+    ai_enabled=True,
+    rate_shopping=True,
+)
+
+
+def subscription_plan(sub) -> Plan:
+    """PRO or GROUP, decided by the subscribed price's lookup key / metadata."""
+    try:
+        item = sub.items.first()
+        price_data = (item.price.stripe_data or {}) if item and item.price else {}
+        if (
+            price_data.get("lookup_key") == GROUP_PRICE_LOOKUP_KEY
+            or (price_data.get("metadata") or {}).get("reptruly_plan") == "group"
+        ):
+            return GROUP
+    except Exception:  # malformed stripe_data must never break plan resolution
+        pass
+    return PRO
+
 
 def active_subscription(user) -> Subscription | None:
     """The user's active/trialing dj-stripe subscription, if any."""
@@ -94,8 +123,9 @@ def starter_trial_days_left(user) -> int:
 def get_plan(user) -> Plan:
     from django.utils import timezone
 
-    if active_subscription(user) is not None:
-        return PRO
+    sub = active_subscription(user)
+    if sub is not None:
+        return subscription_plan(sub)
     if timezone.now() >= starter_trial_ends_at(user):
         return EXPIRED
     return STARTER

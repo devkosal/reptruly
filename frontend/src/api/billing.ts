@@ -39,10 +39,20 @@ export async function fetchBillingStatus(): Promise<BillingStatus | null> {
 }
 
 export type BillingInterval = 'month' | 'year'
+export type BillingPlan = 'pro' | 'group'
 
-/** Create a Stripe Checkout session and return its URL to redirect to. */
-export async function startCheckout(interval: BillingInterval = 'month'): Promise<string> {
-  const res = await fetch(`/api/billing/checkout?interval=${interval}`, {
+/** Create a Stripe Checkout session and return its URL to redirect to.
+
+    Group checkout declares the portfolio size (min 11 properties) so the
+    volume price starts at the right billed quantity. */
+export async function startCheckout(
+  interval: BillingInterval = 'month',
+  plan: BillingPlan = 'pro',
+  properties = 0,
+): Promise<string> {
+  const params = new URLSearchParams({ interval, plan })
+  if (properties > 0) params.set('properties', String(properties))
+  const res = await fetch(`/api/billing/checkout?${params}`, {
     method: 'POST',
     credentials: 'include',
   })

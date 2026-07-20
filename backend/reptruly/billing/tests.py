@@ -239,3 +239,83 @@ class TestSyncSubscriptionQuantity:
             sync_subscription_quantity(user)
 
         stripe_mock.SubscriptionItem.modify.assert_not_called()
+
+
+class TestGroupPlan:
+    """Self-serve Group plan: price-keyed detection + quantity floor."""
+
+    def _group_sub(self, user, lookup_key="reptruly_group_month"):
+        from djstripe.models import (
+            Customer, Plan as DjPlan, Price, Product, Subscription, SubscriptionItem,
+        )
+
+        customer = Customer.objects.create(id=f"cus_grp_{user.pk}")
+        user.customer = customer
+        user.save(update_fields=["customer"])
+        product, _ = Product.objects.get_or_create(
+            id="prod_group", defaults={"name": "reptruly Group", "stripe_data": {}}
+        )
+        price = Price.objects.create(
+            id=f"price_grp_{user.pk}",
+            active=True,
+            product=product,
+            stripe_data={
+                "lookup_key": lookup_key,
+                "recurring": {"interval": "month"},
+            },
+        )
+        # SubscriptionItem's legacy plan FK is non-null; a bare row satisfies it.
+        dj_plan = DjPlan.objects.create(id=f"plan_grp_{user.pk}", stripe_data={})
+        sub = Subscription.objects.create(
+            id=f"sub_grp_{user.pk}", customer=customer,
+            stripe_data={"status": "active"},
+        )
+        SubscriptionItem.objects.create(
+            id=f"si_grp_{user.pk}", subscription=sub, price=price, plan=dj_plan,
+            stripe_data={"quantity": 12},
+        )
+        return sub
+
+    def test_group_lookup_key_resolves_to_group_plan(self):
+        from reptruly.billing.entitlements import GROUP
+
+        user = UserFactory()
+        self._group_sub(user)
+        assert get_plan(user) is GROUP
+
+    def test_other_price_resolves_to_pro(self):
+        user = UserFactory()
+        self._group_sub(user, lookup_key="something_else")
+        assert get_plan(user) is PRO
+
+    def test_group_quantity_floors_at_minimum(self):
+        from reptruly.billing.entitlements import GROUP, GROUP_MIN_PROPERTIES
+
+        user = UserFactory()
+        _add_properties(user, 3)
+        assert desired_quantity(user, GROUP) == GROUP_MIN_PROPERTIES
+
+    def test_group_quantity_tracks_larger_portfolios(self):
+        from reptruly.billing.entitlements import GROUP
+
+        user = UserFactory()
+        _add_properties(user, 15)
+        assert desired_quantity(user, GROUP) == 15
+
+    def test_group_price_reuses_existing_lookup_key(self):
+        from djstripe.models import Price, Product
+
+        from reptruly.billing.api.controllers import _group_price
+
+        product, _ = Product.objects.get_or_create(
+            id="prod_group", defaults={"name": "reptruly Group", "stripe_data": {}}
+        )
+        existing = Price.objects.create(
+            id="price_group_existing",
+            active=True,
+            product=product,
+            stripe_data={"lookup_key": "reptruly_group_month"},
+        )
+        with patch("reptruly.billing.api.controllers.stripe") as stripe_mock:
+            assert _group_price().id == existing.id
+        stripe_mock.Price.create.assert_not_called()
