@@ -1,9 +1,9 @@
-import { CSSProperties, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { CSSProperties, useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import TopNav from '../components/TopNav'
 import PageContainer from '../components/PageContainer'
 import { useAuth } from '../context/AuthContext'
-import { BillingInterval, startCheckout } from '../api/billing'
+import { BillingInterval, BillingStatus, fetchBillingStatus, startCheckout } from '../api/billing'
 import useDocumentTitle from '../hooks/useDocumentTitle'
 
 interface Tier {
@@ -45,15 +45,19 @@ const TIERS: Tier[] = [
     name: 'Pro',
     price: '$29.99',
     cadence: 'per property / month',
-    priceAnnual: '$24.99',
-    cadenceAnnual: 'per property / month · billed annually ($299.90/yr)',
+    priceAnnual: '≈$24.99',
+    cadenceAnnual: 'per property / month · $299.90 billed yearly',
     description: 'For independent hoteliers running 2–10 properties.',
     features: [
       'Up to 10 properties',
       'Booking + Expedia + Google review sync',
       'AI reply drafting for every review',
-      'Per-OTA analytics + AI summaries',
-      'Rate shopping vs. comp set',
+      'Per-OTA analytics, AI summaries & PDF reports',
+      'Rate shopping + 14-night rate outlook',
+      'Rate movement & demand alerts',
+      'Monthly owner report emails',
+      'Embeddable review badge',
+      'API access & CSV export',
       'Priority email support',
     ],
     ctaLabel: 'Upgrade to Pro',
@@ -64,23 +68,26 @@ const TIERS: Tier[] = [
   },
   {
     name: 'Group',
-    price: '$15',
+    price: 'From $15',
     cadence: 'per property / month',
-    description: 'For chains and management companies.',
+    description: 'For chains and management companies running 10+ properties.',
     features: [
-      'Unlimited properties',
-      'Volume discount kicks in at 10+',
-      'Custom OTA integrations',
-      'API access',
-      'Dedicated success manager',
-      'SLA: 99.9% uptime',
+      'Everything in Pro',
+      'More than 10 properties',
+      'Volume pricing — the more properties, the less per property',
+      'Priority onboarding for your portfolio',
+      'Invoice billing available',
     ],
     ctaLabel: 'Contact sales',
     ctaHref: '/contact',
   },
 ]
 
-function TierCta({ tier, interval }: { tier: Tier; interval: BillingInterval }) {
+function TierCta({ tier, interval, status }: {
+  tier: Tier
+  interval: BillingInterval
+  status: BillingStatus | null
+}) {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [busy, setBusy] = useState(false)
@@ -125,6 +132,68 @@ function TierCta({ tier, interval }: { tier: Tier; interval: BillingInterval }) 
     </p>
   ) : null
 
+  const isPro = !!status?.has_pro
+
+  // Plan-aware states for signed-in users.
+  if (tier.name === 'Pro' && isPro) {
+    return (
+      <>
+        <div style={{
+          ...style,
+          background: 'rgba(16,185,129,0.16)',
+          border: '1px solid rgba(110,231,183,0.4)',
+          color: '#6ee7b7',
+          fontWeight: 700,
+          cursor: 'default',
+          boxShadow: 'none',
+        }}>
+          ✓ Your current plan
+        </div>
+        <p style={{
+          fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20,
+          color: 'rgba(255,255,255,0.45)',
+        }}>
+          {status?.quantity ? `${status.quantity} propert${status.quantity === 1 ? 'y' : 'ies'} billed · ` : ''}
+          <Link to="/settings" style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Manage billing in Settings</Link>
+        </p>
+      </>
+    )
+  }
+  if (tier.name === 'Starter' && user && status) {
+    if (isPro) {
+      return (
+        <div style={{
+          ...style,
+          background: 'var(--surface-2)',
+          border: '1px solid var(--border)',
+          color: 'var(--text-faint)',
+          cursor: 'default',
+        }}>
+          Covered by your Pro plan
+        </div>
+      )
+    }
+    return (
+      <>
+        <div style={{
+          ...style,
+          background: 'var(--accent-soft)',
+          border: '1px solid #dcdffc',
+          color: 'var(--accent)',
+          fontWeight: 700,
+          cursor: 'default',
+        }}>
+          ✓ Your current plan
+        </div>
+        {status.trial_days_left !== null && (
+          <p style={{ fontSize: 11, textAlign: 'center', marginTop: -16, marginBottom: 20, color: 'var(--text-faint)' }}>
+            {status.trial_days_left} day{status.trial_days_left === 1 ? '' : 's'} left in your trial
+          </p>
+        )}
+      </>
+    )
+  }
+
   if (!tier.checkout) {
     return <><a href={tier.ctaHref} style={style}>{tier.ctaLabel}</a>{note}</>
   }
@@ -159,7 +228,22 @@ function TierCta({ tier, interval }: { tier: Tier; interval: BillingInterval }) 
 
 export default function Pricing() {
   useDocumentTitle('Pricing')
+  const { user } = useAuth()
   const [billingInterval, setBillingInterval] = useState<BillingInterval>('month')
+  const [status, setStatus] = useState<BillingStatus | null>(null)
+
+  // Signed-in visitors see their actual plan state on the cards.
+  useEffect(() => {
+    if (!user) {
+      setStatus(null)
+      return
+    }
+    let cancelled = false
+    fetchBillingStatus()
+      .then(s => { if (!cancelled && s) setStatus(s) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [user])
   return (
     <>
       <TopNav />
@@ -250,7 +334,7 @@ export default function Pricing() {
                 {billingInterval === 'year' && t.cadenceAnnual ? t.cadenceAnnual : t.cadence}
               </span>
             </div>
-            <TierCta tier={t} interval={billingInterval} />
+            <TierCta tier={t} interval={billingInterval} status={status} />
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {t.features.map(f => (
                 <li key={f} style={{ display: 'flex', gap: 8, padding: '6px 0', fontSize: 13, color: t.highlight ? 'rgba(255,255,255,0.75)' : 'var(--text)' }}>
@@ -284,8 +368,12 @@ export default function Pricing() {
           configuration, no developer time required.
         </p>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 600, margin: '12px auto 0', lineHeight: 1.6 }}>
-          <strong style={{ color: 'var(--text)' }}>Can I cancel anytime?</strong> Yes. Monthly plans cancel at the end of the current period;
-          annual plans get pro-rated refunds for the unused months.
+          <strong style={{ color: 'var(--text)' }}>Can I cancel anytime?</strong> Yes. Cancel from the billing portal and your plan
+          runs until the end of the current billing period — no further charges after that.
+        </p>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 600, margin: '12px auto 0', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--text)' }}>What happens when my trial ends?</strong> Nothing is deleted. Your synced reviews and
+          analytics stay readable — syncing and gated features simply pause until you upgrade to Pro.
         </p>
       </div>
       </PageContainer>
