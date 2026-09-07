@@ -1,8 +1,53 @@
+import logging
 import re
+import time
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+# RapidAPI's Booking.com proxy is flaky: identical requests intermittently come
+# back as 400 (with no useful body), 5xx, or a dropped connection, then succeed
+# seconds later. Retry those a few times with backoff before giving up. Real
+# client errors (401/403 bad key, 404) are not retried.
+_RETRY_STATUSES = frozenset({400, 429, 500, 502, 503, 504})
+_RETRY_ATTEMPTS = 3
+_RETRY_BASE_DELAY = 1.5  # seconds; grows 1.5s, 3s, 6s
+
+
+def _rapidapi_get(url: str, *, headers: dict, params: dict, timeout: float = 30) -> httpx.Response:
+    """httpx.get with retry on transient upstream failures.
+
+    Raises httpx.HTTPStatusError (with the response body in the message) or the
+    underlying transport error once attempts are exhausted.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, _RETRY_ATTEMPTS + 1):
+        try:
+            response = httpx.get(url, headers=headers, params=params, timeout=timeout)
+        except httpx.TransportError as exc:
+            last_exc = exc
+        else:
+            if response.status_code not in _RETRY_STATUSES:
+                response.raise_for_status()
+                return response
+            body = response.text[:200].replace("\n", " ")
+            last_exc = httpx.HTTPStatusError(
+                f"{response.status_code} from {url.rsplit('/', 1)[-1]}: {body or '<empty body>'}",
+                request=response.request,
+                response=response,
+            )
+        if attempt < _RETRY_ATTEMPTS:
+            delay = _RETRY_BASE_DELAY * (2 ** (attempt - 1))
+            logger.warning(
+                "RapidAPI %s attempt %d/%d failed (%s); retrying in %.1fs",
+                url.rsplit("/", 1)[-1], attempt, _RETRY_ATTEMPTS, last_exc, delay,
+            )
+            time.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
 
 
 _BLOCK_ID_PARAMS = (
@@ -155,7 +200,7 @@ class BookingComClient:
         Sort is SORT_RECENT_DESC so newest reviews come first — this lets the sync task
         early-break once it hits already-stored reviews instead of paging to the very end.
         """
-        response = httpx.get(
+        response = _rapidapi_get(
             f"{self.BASE_URL}/hotels/reviews",
             headers=self._headers(),
             params={
@@ -164,9 +209,7 @@ class BookingComClient:
                 "locale": locale,
                 "sort_type": "SORT_RECENT_DESC",
             },
-            timeout=30,
         )
-        response.raise_for_status()
         return response.json()
 
     def fetch_hotel_name(self, hotel_id: int, locale: str = "en-gb") -> str:
@@ -175,13 +218,11 @@ class BookingComClient:
 
     def fetch_hotel_metadata(self, hotel_id: int, locale: str = "en-gb") -> dict:
         """Fetch name + lat/lng + currency + address. Returns the raw payload (or empty dict on miss)."""
-        response = httpx.get(
+        response = _rapidapi_get(
             f"{self.BASE_URL}/hotels/data",
             headers=self._headers(),
             params={"hotel_id": hotel_id, "locale": locale},
-            timeout=30,
         )
-        response.raise_for_status()
         return response.json() or {}
 
     def fetch_hotel_rate(
@@ -196,7 +237,7 @@ class BookingComClient:
 
         Result shape: { 'price': float, 'currency': str, 'room_name': str } or None if sold out.
         """
-        response = httpx.get(
+        response = _rapidapi_get(
             f"{self.BASE_URL}/hotels/room-list",
             headers=self._headers(),
             params={
@@ -208,9 +249,7 @@ class BookingComClient:
                 "locale": "en-gb",
                 "units": "metric",
             },
-            timeout=30,
         )
-        response.raise_for_status()
         payload = response.json()
         # API returns a list with a single object containing 'block'
         if isinstance(payload, list):
@@ -246,7 +285,7 @@ class BookingComClient:
         order_by: str = "distance",
     ) -> list[dict]:
         """Search nearby hotels with available rates for the given dates."""
-        response = httpx.get(
+        response = _rapidapi_get(
             f"{self.BASE_URL}/hotels/search-by-coordinates",
             headers=self._headers(),
             params={
@@ -262,9 +301,7 @@ class BookingComClient:
                 "locale": "en-gb",
                 "page_number": "0",
             },
-            timeout=30,
         )
-        response.raise_for_status()
         return (response.json() or {}).get("result", []) or []
 
     def fetch_all_reviews(
