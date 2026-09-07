@@ -39,6 +39,8 @@ interface AuthContextType {
   logout: () => void
   updateProfile: (payload: ProfileUpdatePayload) => Promise<User>
   isLoading: boolean
+  /** True once the server has confirmed (or denied) the session on this page load. */
+  sessionChecked: boolean
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -67,6 +69,7 @@ function hydrate(raw: any): User {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [sessionChecked, setSessionChecked] = useState(false)
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY)
@@ -79,17 +82,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setIsLoading(false)
 
-    // Refresh from server in the background so any profile edits made elsewhere appear.
-    fetch('/api/auth/me', { credentials: 'include' })
+    // Confirm the session with the server. /session is always 200 so anonymous page loads
+    // don't log a 401 in the console. If the cookie has expired, drop the cached user so the
+    // UI doesn't keep showing a logged-in state the server no longer honours.
+    fetch('/api/auth/session', { credentials: 'include' })
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
-        if (data) {
-          const u = hydrate(data)
+        if (!data) return
+        if (data.authenticated && data.user) {
+          const u = hydrate(data.user)
           setUser(u)
           localStorage.setItem(STORAGE_KEY, JSON.stringify(u))
+        } else {
+          setUser(null)
+          localStorage.removeItem(STORAGE_KEY)
         }
       })
       .catch(() => {})
+      .finally(() => setSessionChecked(true))
   }, [])
 
   function persist(u: User) {
@@ -154,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, signup, logout, updateProfile, isLoading }}>
+    <AuthContext.Provider value={{ user, login, signup, logout, updateProfile, isLoading, sessionChecked }}>
       {children}
     </AuthContext.Provider>
   )

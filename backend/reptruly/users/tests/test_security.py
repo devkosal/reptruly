@@ -137,3 +137,21 @@ class TestSessionsCount:
         assert res.json()["active_sessions"] == 2
         # Sanity: sessions exist in the DB (DB-backed engine).
         assert Session.objects.count() >= 3
+
+
+class TestSessionProbe:
+    """/api/auth/session is the SPA's page-load probe: always 200, never a 401 in the console."""
+
+    def test_anonymous_is_200_and_unauthenticated(self, client):
+        res = client.get("/api/auth/session")
+        assert res.status_code == 200
+        assert res.json() == {"authenticated": False, "user": None}
+
+    def test_logged_in_returns_user(self, client):
+        user = _make_user()
+        _login(client, user)
+        res = client.get("/api/auth/session")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["authenticated"] is True
+        assert body["user"]["username"] == user.username

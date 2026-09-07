@@ -52,7 +52,7 @@ interface PropertyContextType {
 const PropertyContext = createContext<PropertyContextType | null>(null)
 
 export function PropertyProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth()
+  const { user, sessionChecked } = useAuth()
   const [properties, setProperties] = useState<Property[]>([])
   const [propertiesLoaded, setPropertiesLoaded] = useState(false)
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null)
@@ -63,6 +63,8 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
       setPropertiesLoaded(false)
       return
     }
+    // Wait for the server to confirm the session; a stale cached user would 401 here.
+    if (!sessionChecked) return
     try {
       const res = await fetch('/api/properties', { credentials: 'include' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -73,7 +75,7 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
     } finally {
       setPropertiesLoaded(true)
     }
-  }, [user])
+  }, [user, sessionChecked])
 
   useEffect(() => { refresh() }, [refresh])
 

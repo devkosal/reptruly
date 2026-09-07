@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import TopNav from '../components/TopNav'
 import { useAuth } from '../context/AuthContext'
@@ -46,110 +45,84 @@ const FEATURES = [
   },
 ]
 
-const STATS = [
-  { number: '3', label: 'OTAs connected per property', sub: 'Booking · Expedia · Google' },
-  { number: '1 min', label: 'Setup time', sub: 'Paste a link — reviews start syncing' },
-  { number: '24h', label: 'Daily auto-refresh', sub: 'Every channel, every morning' },
-  { number: '12mo', label: 'Demand calendar horizon', sub: 'Events · weather · holidays' },
-]
-
 interface FeaturePill {
   abbr: string
   name: string
   tagline: string
-  bullets: string[]
 }
 
 const FEATURE_PILLS: FeaturePill[] = [
   {
     abbr: 'RVI', name: 'Review Inbox',
     tagline: 'Every guest review from every OTA in one timeline.',
-    bullets: ['Booking, Expedia, and Google in one inbox', 'Filter by score, OTA, date, or reply status', 'One-click jump to the OTA extranet to reply'],
   },
   {
     abbr: 'REP', name: 'Reply Studio',
     tagline: 'AI drafts replies in your voice.',
-    bullets: ['Tone-matched to each reviewer', 'Edit before posting — never auto-sent', 'Templates for 1-star, 5-star, and edge cases'],
   },
   {
     abbr: 'CMP', name: 'Comp Set',
     tagline: 'Your nightly rate vs. every nearby competitor.',
-    bullets: ['Live Booking.com prices around your radius', 'Distance, star rating, and review score side-by-side', 'Spot when you\'re leaving money on the table'],
   },
   {
     abbr: 'DMC', name: 'Demand Calendar',
     tagline: '12 months of demand laid out by day.',
-    bullets: ['Events, holidays, and weather in one grid', 'Each day scored 0–10 for demand impact', 'Heat map shows the busy weekends ahead'],
   },
   {
     abbr: 'EVT', name: 'Event Radar',
     tagline: 'Concerts, sports, and shows within your radius.',
-    bullets: ['Pulled from Ticketmaster automatically', 'Impact-scored — Taylor Swift > school play', 'Linked to the official event page'],
   },
   {
     abbr: 'WX', name: 'Weather Lens',
     tagline: '16-day weather forecast for your address.',
-    bullets: ['Highs, lows, and precipitation per day', 'Powered by Open-Meteo', 'Price ahead of storms or heatwaves'],
   },
   {
     abbr: 'HOL', name: 'Holiday Map',
     tagline: 'National and regional holidays auto-detected.',
-    bullets: ['Country-specific from your property\'s coordinates', 'Federal, state, and observance days', 'Surfaced on the demand calendar'],
   },
   {
     abbr: 'AIS', name: 'AI Summaries',
     tagline: 'Plain-English digest of your review batch.',
-    bullets: ['Top complaints and top compliments', 'Themes broken out per OTA', 'Refreshes whenever new reviews land'],
   },
   {
     abbr: 'TRD', name: 'Trend Lines',
     tagline: 'Weekly and monthly score trends per OTA.',
-    bullets: ['Spot dips before they become patterns', 'Compare 7-day vs 30-day deltas', 'Per-channel and combined view'],
   },
   {
     abbr: 'OTA', name: 'OTA Sync',
     tagline: 'Reviews refresh automatically — no setup.',
-    bullets: ['Daily 24h sync on every plan', 'Force a refresh anytime', 'No API keys, no IT involvement'],
   },
   {
     abbr: 'TAG', name: 'Auto-Tags',
     tagline: 'Reviews tagged by topic, automatically.',
-    bullets: ['Cleanliness, staff, AC, breakfast, parking…', 'Filter the inbox by any tag', 'Per-topic sentiment trend'],
   },
   {
     abbr: 'SEN', name: 'Sentiment',
     tagline: 'Positive / neutral / negative scoring per review.',
-    bullets: ['Score-based, language-aware', 'Topic-level breakdown', 'Powers the AI summary digest'],
   },
   {
     abbr: 'SLA', name: 'Reply SLA',
     tagline: 'Track how fast your team replies.',
-    bullets: ['Median time-to-reply per OTA', 'Set a target, see who\'s behind', 'Per-property and per-user breakdown'],
   },
   {
     abbr: 'KPI', name: 'KPI Cards',
     tagline: 'The numbers that matter, at a glance.',
-    bullets: ['Average score, reply rate, weekly volume', 'One property or all combined', 'Color-coded against your targets'],
   },
   {
     abbr: 'DST', name: 'Score Bands',
     tagline: 'See how reviews stack across 0–10 bands.',
-    bullets: ['Distribution histogram per OTA', 'Catch high-volume 6s hiding in averages', 'Drill into any band to read those reviews'],
   },
   {
     abbr: 'SRC', name: 'Search & Filter',
     tagline: 'Full-text search across every review.',
-    bullets: ['Combine with date, OTA, score, reply filters', 'Saved filters per user', 'Instant results — no rebuild step'],
   },
   {
     abbr: 'EXP', name: 'CSV Export',
     tagline: 'Download filtered reviews as CSV.',
-    bullets: ['Open in Excel, Sheets, or Notion', 'Useful for board reports', 'Includes scores, replies, and timestamps'],
   },
   {
     abbr: 'MPR', name: 'Multi-Property',
     tagline: 'Run several properties under one login.',
-    bullets: ['Switch context with one click', 'All-properties roll-up dashboard', 'Per-property permissions on Pro+'],
   },
 ]
 
@@ -207,8 +180,6 @@ const eyebrow: React.CSSProperties = {
 export default function Home() {
   useDocumentTitle('')
   const { user } = useAuth()
-  const [activePill, setActivePill] = useState<string>(FEATURE_PILLS[0].abbr)
-  const activeFeature = FEATURE_PILLS.find(f => f.abbr === activePill) || FEATURE_PILLS[0]
 
   return (
     <>
@@ -279,19 +250,6 @@ export default function Home() {
 
           {/* Hero composite — overlapping mockups for all four tools */}
           <HeroComposite />
-        </div>
-      </section>
-
-      {/* STATS STRIP — light band */}
-      <section style={{ background: 'var(--bg)', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', padding: '40px 32px' }}>
-        <div style={{ maxWidth: 1280, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 24 }}>
-          {STATS.map(s => (
-            <div key={s.label} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 32, fontWeight: 750, color: 'var(--ink)', lineHeight: 1, marginBottom: 8, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{s.number}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{s.label}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{s.sub}</div>
-            </div>
-          ))}
         </div>
       </section>
 
@@ -414,150 +372,44 @@ export default function Home() {
         </div>
       </section>
 
-      {/* FEATURE PILLS — interactive grid on light background */}
+      {/* EVERYTHING INCLUDED — compact list on light background */}
       <section style={{
-        padding: '88px 32px',
+        padding: '72px 32px',
         background: 'var(--bg)',
         borderBottom: '1px solid var(--border)',
       }}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: 40 }}>
+          <div style={{ textAlign: 'center', marginBottom: 36 }}>
             <div style={eyebrow}>
-              Everything inside
+              Everything included
             </div>
-            <h2 style={{ fontSize: 38, fontWeight: 800, marginBottom: 14, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
-              See everything, miss nothing
+            <h2 style={{ fontSize: 34, fontWeight: 800, marginBottom: 12, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
+              Ships on day one. No add-ons.
             </h2>
-            <p style={{ fontSize: 16, color: 'var(--text-muted)', maxWidth: 620, margin: '0 auto', lineHeight: 1.65 }}>
-              {FEATURE_PILLS.length} superpowers, one workspace. Tap any tile to see what it does — everything ships on day one, no add-ons, no upsell.
+            <p style={{ fontSize: 15, color: 'var(--text-muted)', maxWidth: 560, margin: '0 auto', lineHeight: 1.6 }}>
+              Every feature below is part of the workspace, not an upsell.
             </p>
           </div>
-
-          {/* Pills grid — full feature name in the chip; click to view its description */}
-          <div style={{
+          <ul style={{
+            listStyle: 'none', margin: 0, padding: 0,
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-            gap: 10,
-            marginBottom: 24,
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            columnGap: 32, rowGap: 14,
           }}>
-            {FEATURE_PILLS.map(f => {
-              const isActive = activePill === f.abbr
-              return (
-                <button
-                  key={f.abbr}
-                  onClick={() => setActivePill(f.abbr)}
-                  style={{
-                    background: isActive ? 'var(--grad-accent)' : 'var(--surface)',
-                    border: `1px solid ${isActive ? 'transparent' : 'var(--border)'}`,
-                    borderRadius: 12,
-                    padding: '16px 14px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                    boxShadow: isActive
-                      ? '0 8px 20px rgba(79,70,229,0.35)'
-                      : 'var(--shadow-sm)',
-                    transform: isActive ? 'translateY(-2px)' : 'none',
-                    fontFamily: 'inherit',
-                    minHeight: 64,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    textAlign: 'center',
-                  }}
-                  onMouseEnter={e => {
-                    if (!isActive) {
-                      e.currentTarget.style.borderColor = 'var(--accent)'
-                      e.currentTarget.style.transform = 'translateY(-1px)'
-                      e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-                    }
-                  }}
-                  onMouseLeave={e => {
-                    if (!isActive) {
-                      e.currentTarget.style.borderColor = 'var(--border)'
-                      e.currentTarget.style.transform = 'none'
-                      e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
-                    }
-                  }}
-                >
-                  <span style={{
-                    fontSize: 14, fontWeight: 700, lineHeight: 1.2,
-                    letterSpacing: '-0.005em',
-                    color: isActive ? '#fff' : 'var(--ink)',
-                  }}>
-                    {f.name}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Detail card */}
-          <div style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 14,
-            padding: '28px 32px',
-            boxShadow: 'var(--shadow-md)',
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <h3 style={{ fontSize: 22, fontWeight: 800, margin: '0 0 6px', letterSpacing: '-0.02em', color: 'var(--ink)' }}>
-                {activeFeature.name}
-              </h3>
-              <p style={{ fontSize: 15, color: 'var(--text)', lineHeight: 1.55, margin: '0 0 14px', fontWeight: 500 }}>
-                {activeFeature.tagline}
-              </p>
-              <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {activeFeature.bullets.map(b => (
-                  <li key={b} style={{
-                    fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.55,
-                    paddingLeft: 22, position: 'relative',
-                  }}>
-                    <span style={{
-                      position: 'absolute', left: 0, top: 7,
-                      width: 8, height: 8, borderRadius: '50%',
-                      background: 'var(--grad-accent)',
-                    }} />
-                    {b}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* TESTIMONIAL — white section, deep-ink quote card */}
-      <section style={{ padding: '88px 32px', background: 'var(--surface)' }}>
-        <div style={{
-          maxWidth: 880, margin: '0 auto', textAlign: 'center',
-          background: [
-            'radial-gradient(ellipse 60% 70% at 85% 0%, rgba(124,58,237,0.25), transparent 60%)',
-            'var(--grad-dark)',
-          ].join(', '),
-          color: '#fff', padding: '48px 40px', borderRadius: 18,
-          border: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: 'var(--shadow-lg)',
-          position: 'relative', overflow: 'hidden',
-        }}>
-          <div style={{ position: 'relative' }}>
-            <div style={{ fontSize: 44, color: '#818cf8', marginBottom: 16, lineHeight: 1, fontWeight: 800 }}>"</div>
-            <p style={{ fontSize: 22, fontWeight: 600, color: 'rgba(255,255,255,0.92)', lineHeight: 1.45, marginBottom: 24, letterSpacing: '-0.01em' }}>
-              We cut review-response time from 3 days to 4 hours.
-              The Demand Calendar paid for itself the first weekend a Morgan Wallen show came to town.
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-              <div style={{
-                width: 44, height: 44, borderRadius: '50%',
-                background: 'var(--grad-accent)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', fontWeight: 800,
-              }}>JG</div>
-              <div style={{ textAlign: 'left' }}>
-                <div style={{ fontWeight: 700, color: 'rgba(255,255,255,0.92)' }}>Jamie Garrett</div>
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>GM · Garnet Inn Group · 3 properties</div>
-              </div>
-            </div>
-          </div>
+            {FEATURE_PILLS.map(f => (
+              <li key={f.abbr} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', minWidth: 0 }}>
+                <span aria-hidden style={{
+                  flex: 'none', marginTop: 6,
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: 'var(--grad-accent)',
+                }} />
+                <span style={{ fontSize: 14, lineHeight: 1.5, color: 'var(--text-muted)' }}>
+                  <span style={{ fontWeight: 700, color: 'var(--ink)' }}>{f.name}</span>
+                  {' — '}{f.tagline}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 

@@ -57,6 +57,13 @@ class UserOut(Schema):
     email_verified: bool = False
 
 
+class SessionOut(Schema):
+    """Always-200 session probe so anonymous page loads don't log 401s in the browser."""
+
+    authenticated: bool
+    user: UserOut | None = None
+
+
 class ProfileUpdateIn(Schema):
     name: str | None = None
     company_name: str | None = None
@@ -250,6 +257,13 @@ class AuthAPI:
         if not request.user.is_authenticated:
             raise HttpError(401, "Not authenticated")
         return 200, {"active_sessions": len(_user_session_keys(request.user))}
+
+    @route.get("/session", auth=None, response=SessionOut)
+    def session(self, request):
+        """Like /me, but 200 for anonymous callers. Used by the SPA on every page load."""
+        if not request.user.is_authenticated:
+            return {"authenticated": False, "user": None}
+        return {"authenticated": True, "user": _user_out(request.user)}
 
     @route.get("/me", auth=None, response=UserOut)
     def me(self, request):

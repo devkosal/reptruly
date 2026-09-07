@@ -254,9 +254,22 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             )
           })}
           {properties.length === 0 && (
-            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', padding: '8px 4px', lineHeight: 1.5 }}>
-              No properties yet. Click "+ Add" to connect your first one.
-            </div>
+            <button
+              type="button"
+              onClick={openCreate}
+              style={{
+                width: '100%', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+                background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.18)',
+                borderRadius: 10, padding: '12px 12px', marginTop: 4,
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(255,255,255,0.92)', marginBottom: 3 }}>
+                Connect your first property
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 1.5 }}>
+                Paste a Booking, Expedia, or Google link. Reviews start syncing right away.
+              </div>
+            </button>
           )}
         </div>
 
